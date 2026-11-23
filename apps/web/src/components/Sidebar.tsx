@@ -273,6 +273,11 @@ import {
   type SidebarProviderEntry,
   type SidebarSweepAction,
 } from "./sidebar/SidebarThreadRow";
+import { SidebarSubagentTreeRow } from "./sidebar/SidebarSubagentTreeRow";
+import {
+  buildSidebarChildThreadsByParent,
+  collectVisibleSidebarDescendants,
+} from "./sidebar/subagentTree";
 import {
   draftTerminalLabel,
   SidebarDraftBlock,
@@ -1023,6 +1028,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const projectGroupsRef = useRef(projectGroups);
   const persistedProjectScopeKeys = useUiStateStore((store) => store.sidebarProjectScopeKeys);
   const setPersistedProjectScopeKeys = useUiStateStore((store) => store.setSidebarProjectScopeKeys);
+  const threadSubtreeExpandedById = useUiStateStore((store) => store.threadSubtreeExpandedById);
+  const setThreadSubtreeExpanded = useUiStateStore((store) => store.setThreadSubtreeExpanded);
+  const toggleThreadSubtree = useStableCallback((threadKey: string, currentlyExpanded: boolean) => {
+    setThreadSubtreeExpanded(threadKey, !currentlyExpanded);
+  });
   const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
     reduceSidebarProjectScopeMenuState,
     { open: false, query: "" },
@@ -1130,6 +1140,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             ? asLaunchingThread(thread)
             : thread,
         );
+  const childThreadsByParent = buildSidebarChildThreadsByParent(
+    listedThreads,
+    delegatedUnderParent,
+  );
+  const allThreadsByKey = new Map(
+    listedThreads.map((thread) => [threadShellKey(thread), thread] as const),
+  );
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -1457,6 +1474,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const orderedThreadKeysRef = useRef(orderedThreadKeys);
   // Read changing maps/sets through refs so streamed events preserve row callbacks.
   const threadByKeyRef = useRef(threadByKey);
+  const allThreadsByKeyRef = useRef(allThreadsByKey);
   const settledThreadKeysRef = useRef(settledThreadKeys);
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
 
@@ -1852,6 +1870,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     projectGroupsRef.current = projectGroups;
     orderedThreadKeysRef.current = orderedThreadKeys;
     threadByKeyRef.current = threadByKey;
+    allThreadsByKeyRef.current = allThreadsByKey;
     settledThreadKeysRef.current = settledThreadKeys;
     snoozedThreadKeysRef.current = snoozedThreadKeys;
     sectionByThreadKeyRef.current = sectionByThreadKey;
@@ -2046,12 +2065,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       cancelThreadDrag();
     }
   }, [cancelThreadDrag, dragState, sidebarListItems]);
+  const subtreeExpansionKey = Object.entries(threadSubtreeExpandedById)
+    .map(([key, expanded]) => `${key}=${expanded ? "1" : "0"}`)
+    .sort()
+    .join("\n");
   // Only order, section, or draft changes need layout reads and motion.
   const listMotionLayoutKey = [
     sidebarListItemsKey,
     projectFolders
       ?.map((folder) => `${folder.group.projectKey}:${folder.threads.length}`)
       .join("\n") ?? "",
+    childThreadsByParent.size,
+    subtreeExpansionKey,
     visibleDraftSessionCount,
     routeDraftIdForRows ?? "",
   ].join("\0");
@@ -2670,9 +2695,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           await handleMultiSelectContextMenu(position, source);
           return;
         }
-        // Search results also reach threads in collapsed shelves, which are not rendered rows.
+        // Search results and subagent tree rows can reach threads outside the top-level row map.
         const thread =
           threadByKeyRef.current.get(threadKey) ??
+          allThreadsByKeyRef.current.get(threadKey) ??
           searchableThreads.find((candidate) => threadShellKey(candidate) === threadKey);
         if (!thread) return;
         const threadWorkspacePath =
@@ -3489,7 +3515,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     )}
                   >
                     {(() => {
-                      const renderThreadRow = (
+                      const appendThreadRows = (
+                        target: ReactNode[],
                         thread: EnvironmentThreadShell,
                         section: SidebarSection,
                         // The tree row of the project folder this row sits in.
@@ -3507,7 +3534,20 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           : isCard
                             ? "card"
                             : "slim";
-                        return (
+                        const subtree = collectVisibleSidebarDescendants(
+                          threadKey,
+                          childThreadsByParent,
+                          threadSubtreeExpandedById,
+                          routeThreadKey,
+                        );
+                        const routeInDescendants =
+                          routeThreadKey !== null &&
+                          subtree.rows.some(
+                            (descendant) => descendant.threadKey === routeThreadKey,
+                          );
+                        const parentIsActive =
+                          !routeInDescendants && routeRowThreadKey === threadKey;
+                        target.push(
                           <SortableThreadRow
                             key={threadKey}
                             sortableId={threadKey}
@@ -3559,7 +3599,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 : null
                             }
                             wokeAt={threadWokeAt(thread, { now: snoozeNow })}
-                            isActive={routeRowThreadKey === threadKey}
+                            isActive={parentIsActive}
                             revealRef={
                               routeRowThreadKey === threadKey ? revealActiveRow : undefined
                             }
@@ -3605,8 +3645,38 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             onUnpin={attemptUnpin}
                             onAcknowledgeWoke={acknowledgeWoke}
                             onFileDropThreads={handleThreadFileDrop}
-                          />
+                            subagentTree={
+                              subtree.summary.totalCount > 0
+                                ? {
+                                    ...subtree.summary,
+                                    expanded: subtree.isExpanded,
+                                    onToggle: toggleThreadSubtree,
+                                  }
+                                : undefined
+                            }
+                          />,
                         );
+                        for (const descendant of subtree.rows) {
+                          target.push(
+                            <SidebarSubagentTreeRow
+                              key={`subagent:${descendant.threadKey}`}
+                              thread={descendant.thread}
+                              parentKey={descendant.parentKey}
+                              depth={descendant.depth}
+                              childSummary={descendant.childSummary}
+                              isExpanded={descendant.isExpanded}
+                              isActive={routeThreadKey === descendant.threadKey}
+                              providerEntryByInstanceId={
+                                providerEntriesByEnvironment.get(descendant.thread.environmentId) ??
+                                EMPTY_PROVIDER_ENTRIES
+                              }
+                              onToggleExpand={toggleThreadSubtree}
+                              onThreadClick={handleThreadClick}
+                              onThreadActivate={navigateToThread}
+                              onContextMenu={handleThreadContextMenu}
+                            />,
+                          );
+                        }
                       };
                       const from = isContextDrag ? null : (dragState?.activeSection ?? null);
                       const items: ReactNode[] = [
@@ -3627,7 +3697,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         if (item.kind === "thread") {
                           // Folders draw active rows in their own place below.
                           if (projectFolders !== null && item.section === "active") continue;
-                          items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
+                          appendThreadRows(items, threadByKey.get(item.key)!, item.section);
                           continue;
                         }
                         if (projectFolders !== null && item.marker === "active-placeholder") {
@@ -3644,12 +3714,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               />,
                             );
                             for (const thread of folder.threads) {
-                              items.push(
-                                renderThreadRow(
-                                  thread,
-                                  "active",
-                                  sidebarFolderRowId(folder.group.projectKey),
-                                ),
+                              appendThreadRows(
+                                items,
+                                thread,
+                                "active",
+                                sidebarFolderRowId(folder.group.projectKey),
                               );
                             }
                           }
