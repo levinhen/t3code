@@ -1,5 +1,9 @@
 import { toServerClock } from "@t3tools/client-runtime/clock";
-import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import {
+  parseScopedThreadKey,
+  scopeThreadRef,
+  scopedThreadKey,
+} from "@t3tools/client-runtime/environment";
 import { formatWorkingDurationLabel } from "@t3tools/client-runtime/state/models";
 import { resolveThreadActivityTimestamp } from "@t3tools/client-runtime/state/thread-sort";
 import {
@@ -21,6 +25,7 @@ import {
 } from "lucide-react";
 import {
   memo,
+  useEffect,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -31,7 +36,9 @@ import { contextMenuSourceOf } from "../../contextMenuSource";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useNowSecond } from "../../hooks/useNowSecond";
 import { shouldShowInstanceBadge } from "../../providerInstances";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { useThreadShell } from "../../state/entities";
+import { threadFamilies } from "../../state/threads";
 import { formatRelativeTime } from "../../timestampFormat";
 import type { SidebarThreadSummary } from "../../types";
 import { cn } from "~/lib/utils";
@@ -82,6 +89,17 @@ function SubagentWorkingDurationTick(props: { environmentId: EnvironmentId; star
   );
 }
 
+/** Holds a thread's family in the shell rows while its subtree is open, so idle children load. */
+export function SidebarThreadFamilyMount({ threadKey }: { threadKey: string }) {
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- holds the family in the thread family registry while the subtree is open
+  useEffect(() => {
+    const ref = parseScopedThreadKey(threadKey);
+    if (ref === null) return;
+    return threadFamilies.mount(appAtomRegistry, ref.environmentId, ref.threadId);
+  }, [threadKey]);
+  return null;
+}
+
 const SUBTREE_DOT_CLASS = {
   attention: "bg-warning",
   failed: "bg-error",
@@ -93,6 +111,8 @@ export interface SidebarSubagentTreeRowProps {
   readonly parentKey: string;
   readonly depth: number;
   readonly childSummary: SidebarSubtreeSummary;
+  /** Idle children the shell left out load on expand, so the count is unknown until then. */
+  readonly hasIdleChildren: boolean;
   readonly isExpanded: boolean;
   readonly isActive: boolean;
   readonly revealRef?:
@@ -142,7 +162,13 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
           ? "bg-success/80"
           : "bg-muted-foreground/45";
 
-  const hasChildren = props.childSummary.totalCount > 0;
+  const hasChildren = props.childSummary.totalCount > 0 || props.hasIdleChildren;
+  const countKnown = !props.hasIdleChildren || props.isExpanded;
+  const childrenLabel = countKnown
+    ? gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
+        count: props.childSummary.totalCount,
+      })
+    : gt("subagents");
   const cappedDepth = Math.min(props.depth, 5);
   const indentPx = 12 + (cappedDepth - 1) * 14;
   const { revealRef } = props;
@@ -218,18 +244,8 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
               aria-expanded={props.isExpanded}
               aria-label={
                 props.isExpanded
-                  ? gt("Collapse {label}", {
-                      label: gt(
-                        "{count, plural, one {{count} subagent} other {{count} subagents}}",
-                        { count: props.childSummary.totalCount },
-                      ),
-                    })
-                  : gt("Expand {label}", {
-                      label: gt(
-                        "{count, plural, one {{count} subagent} other {{count} subagents}}",
-                        { count: props.childSummary.totalCount },
-                      ),
-                    })
+                  ? gt("Collapse {label}", { label: childrenLabel })
+                  : gt("Expand {label}", { label: childrenLabel })
               }
               onPointerDown={(event) => event.stopPropagation()}
               onClick={handleToggleClick}
@@ -277,7 +293,7 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
           >
             {thread.title}
           </span>
-          {hasChildren && !props.isExpanded ? (
+          {props.childSummary.totalCount > 0 && countKnown && !props.isExpanded ? (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-sidebar-control-surface/70 px-1 py-px text-2xs tabular-nums text-sidebar-muted-foreground">
               {props.childSummary.attentionStatus ? (
                 <span

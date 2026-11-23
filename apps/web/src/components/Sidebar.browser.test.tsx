@@ -646,10 +646,10 @@ describe("sidebar subagent tree", () => {
       1,
     );
 
-    const childToggle = screen.container.querySelector<HTMLButtonElement>(
-      '[data-testid="sidebar-subagent-row"] [data-testid="sidebar-subagent-tree-toggle"]',
-    )!;
-    await userEvent.click(childToggle);
+    // The keyboard path: the parent's hover card, open under the resting pointer, can cover the
+    // child rows in a narrow test viewport.
+    screen.container.querySelector<HTMLElement>('[data-testid="sidebar-subagent-row"]')!.focus();
+    await userEvent.keyboard("{ArrowRight}");
     await expect.element(screen.getByText("Grandchild subagent")).toBeInTheDocument();
     expect(screen.container.querySelectorAll('[data-testid="sidebar-subagent-row"]')).toHaveLength(
       2,

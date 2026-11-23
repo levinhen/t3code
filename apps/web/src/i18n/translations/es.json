@@ -830,6 +830,7 @@
   "72cbd65a716e0c29": "{label} en {elapsed}",
   "964254ee2ab866a7": "subagente",
   "8cab38a22f2ae630": "{count, plural, one {{count} subagente} other {{count} subagentes}}",
+  "aff4cea85964d92a": "subagentes",
   "008059c2d5010b7e": "comando",
   "8ddc80d418356e05": "{count, plural, one {{count} comando} other {{count} comandos}}",
   "50b3f7f149db4f51": "monitor",

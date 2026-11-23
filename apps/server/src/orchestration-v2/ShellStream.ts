@@ -189,6 +189,7 @@ type ShellTrimRow = Pick<
 interface ShellTrimFacts {
   readonly subagentParentIds: ReadonlySet<string>;
   readonly subagentThreadIds: Set<string>;
+  readonly subagentParentById: ReadonlyMap<string, ThreadId>;
   /** Only the store's index knows these; shells alone leave it empty. */
   readonly remoteTaskParentIds: ReadonlySet<string>;
   /** Undefined when no thread is settled, so none is older. */
@@ -201,13 +202,17 @@ const NEWEST_SETTLED_KEPT = 25;
 function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
   const subagentParentIds = new Set<string>();
   const subagentThreadIds = new Set<string>();
+  const subagentParentById = new Map<string, ThreadId>();
   const remoteTaskParentIds = new Set<string>();
   const settledTimes: Array<number> = [];
   for (const row of rows) {
     if (row.hasRemoteTasks === true) remoteTaskParentIds.add(row.id);
     if (row.lineage.relationshipToParent === "subagent") {
       subagentThreadIds.add(row.id);
-      if (row.lineage.parentThreadId) subagentParentIds.add(row.lineage.parentThreadId);
+      if (row.lineage.parentThreadId) {
+        subagentParentIds.add(row.lineage.parentThreadId);
+        subagentParentById.set(row.id, row.lineage.parentThreadId);
+      }
     } else if (
       isListedThreadLineage(row.lineage) &&
       row.settledOverride === "settled" &&
@@ -230,6 +235,7 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
   return {
     subagentParentIds,
     subagentThreadIds,
+    subagentParentById,
     remoteTaskParentIds,
     olderSettledBeforeMs,
     olderSettledCounts: Array.from(counts, ([projectId, count]) => ({ projectId, count })),
@@ -357,12 +363,27 @@ function trimShellSnapshot(
   const threads = options.omitIdleSubagents
     ? omitIdleSubagentShellsWith(base.threads, facts)
     : base.threads;
-  if (!options.omitOlderSettled) return { ...base, threads };
+  const trimmed: OrchestrationV2ShellSnapshot = options.omitIdleSubagents
+    ? { ...base, threads, idleSubagentParentIds: omittedSubagentParentIds(threads, facts) }
+    : { ...base, threads };
+  if (!options.omitOlderSettled) return trimmed;
   const older = omitOlderSettledShellsWith(
     { threads, snapshotSequence: base.snapshotSequence, now: options.now },
     facts,
   );
-  return { ...base, threads: older.threads, olderSettled: older.olderSettled };
+  return { ...trimmed, threads: older.threads, olderSettled: older.olderSettled };
+}
+
+function omittedSubagentParentIds(
+  kept: ReadonlyArray<Pick<OrchestrationV2ThreadShell, "id">>,
+  facts: Pick<ShellTrimFacts, "subagentParentById">,
+): ReadonlyArray<ThreadId> {
+  const keptIds = new Set<string>(kept.map((thread) => thread.id));
+  const parentIds = new Set<ThreadId>();
+  for (const [threadId, parentId] of facts.subagentParentById) {
+    if (!keptIds.has(threadId)) parentIds.add(parentId);
+  }
+  return [...parentIds];
 }
 
 /**

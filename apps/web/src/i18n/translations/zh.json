@@ -830,6 +830,7 @@
   "72cbd65a716e0c29": "{label}，用时 {elapsed}",
   "964254ee2ab866a7": "子智能体",
   "8cab38a22f2ae630": "{count, plural, other {{count} 个子智能体}}",
+  "aff4cea85964d92a": "子智能体",
   "008059c2d5010b7e": "命令",
   "8ddc80d418356e05": "{count, plural, other {{count} 条命令}}",
   "50b3f7f149db4f51": "监控",
