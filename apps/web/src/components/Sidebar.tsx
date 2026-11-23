@@ -150,6 +150,7 @@ import {
   readThreadShell,
   useAllEnvironmentProjectSnapshotsReady,
   useDelegatedUnderParent,
+  useIdleSubagentParents,
   useProjects,
   useServerConfigs,
   useQuietThreadShells,
@@ -272,7 +273,7 @@ import {
   type SidebarProviderEntry,
   type SidebarSweepAction,
 } from "./sidebar/SidebarThreadRow";
-import { SidebarSubagentTreeRow } from "./sidebar/SidebarSubagentTreeRow";
+import { SidebarSubagentTreeRow, SidebarThreadFamilyMount } from "./sidebar/SidebarSubagentTreeRow";
 import {
   buildSidebarChildThreadsByParent,
   collectVisibleSidebarDescendants,
@@ -937,6 +938,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     projectScopeItems: lookupProjectScopeItems,
   } = useSidebarLookups();
   const delegatedUnderParent = useDelegatedUnderParent();
+  const idleSubagentParents = useIdleSubagentParents();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -3528,6 +3530,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         const subtree = collectVisibleSidebarDescendants(
                           threadKey,
                           childThreadsByParent,
+                          idleSubagentParents,
                           threadSubtreeExpandedById,
                           routeThreadKey,
                         );
@@ -3637,9 +3640,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             onAcknowledgeWoke={acknowledgeWoke}
                             onFileDropThreads={handleThreadFileDrop}
                             subagentTree={
-                              subtree.summary.totalCount > 0
+                              subtree.summary.totalCount > 0 || subtree.hasIdleChildren
                                 ? {
                                     ...subtree.summary,
+                                    hasIdleChildren: subtree.hasIdleChildren,
                                     expanded: subtree.isExpanded,
                                     onToggle: toggleThreadSubtree,
                                   }
@@ -3655,6 +3659,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               parentKey={descendant.parentKey}
                               depth={descendant.depth}
                               childSummary={descendant.childSummary}
+                              hasIdleChildren={descendant.hasIdleChildren}
                               isExpanded={descendant.isExpanded}
                               isActive={routeThreadKey === descendant.threadKey}
                               providerEntryByInstanceId={
@@ -3665,6 +3670,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               onThreadClick={handleThreadClick}
                               onThreadActivate={navigateToThread}
                               onContextMenu={handleThreadContextMenu}
+                            />,
+                          );
+                        }
+                        for (const familyKey of subtree.familyKeys) {
+                          target.push(
+                            <SidebarThreadFamilyMount
+                              key={`family:${familyKey}`}
+                              threadKey={familyKey}
                             />,
                           );
                         }

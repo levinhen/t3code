@@ -145,6 +145,10 @@ export function useDelegatedUnderParent(): ReadonlySet<string> {
   return useAtomValue(environmentThreadShells.delegatedUnderParentAtom);
 }
 
+export function useIdleSubagentParents(): ReadonlySet<string> {
+  return useAtomValue(environmentThreadShells.idleSubagentParentsAtom);
+}
+
 export function useThreadShellsForProjectRefs(
   refs: ReadonlyArray<ScopedProjectRef>,
 ): ReadonlyArray<EnvironmentThreadShell> {

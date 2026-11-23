@@ -830,6 +830,7 @@
   "72cbd65a716e0c29": "{label} ({elapsed})",
   "964254ee2ab866a7": "サブエージェント",
   "8cab38a22f2ae630": "{count, plural, other {{count} 個のサブエージェント}}",
+  "aff4cea85964d92a": "サブエージェント",
   "008059c2d5010b7e": "コマンド",
   "8ddc80d418356e05": "{count, plural, other {{count} 個のコマンド}}",
   "50b3f7f149db4f51": "モニター",

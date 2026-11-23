@@ -12,6 +12,7 @@ import {
 const localEnv = EnvironmentId.make("local");
 const remoteEnv = EnvironmentId.make("remote");
 const projectId = ProjectId.make("project-1");
+const NONE: ReadonlySet<string> = new Set();
 
 function makeThread(overrides: ThreadFixtureOverrides = {}) {
   return makeThreadFixture({
@@ -127,11 +128,14 @@ describe("sidebar subagent tree", () => {
     ];
     const idleByParent = buildSidebarChildThreadsByParent(idleThreads, new Set());
 
-    expect(collectVisibleSidebarDescendants(rootKey, idleByParent, {}, null).rows).toEqual([]);
+    expect(collectVisibleSidebarDescendants(rootKey, idleByParent, NONE, {}, null).rows).toEqual(
+      [],
+    );
 
     const manualExpanded = collectVisibleSidebarDescendants(
       rootKey,
       idleByParent,
+      NONE,
       { [rootKey]: true },
       null,
     );
@@ -141,6 +145,7 @@ describe("sidebar subagent tree", () => {
     const activeGrandchild = collectVisibleSidebarDescendants(
       rootKey,
       idleByParent,
+      NONE,
       {},
       grandchildKey,
     );
@@ -152,6 +157,7 @@ describe("sidebar subagent tree", () => {
     const explicitlyCollapsed = collectVisibleSidebarDescendants(
       rootKey,
       idleByParent,
+      NONE,
       { [rootKey]: false },
       grandchildKey,
     );
@@ -174,7 +180,7 @@ describe("sidebar subagent tree", () => {
       }),
     ];
     const runningByParent = buildSidebarChildThreadsByParent(runningThreads, new Set());
-    const autoRunning = collectVisibleSidebarDescendants(rootKey, runningByParent, {}, null);
+    const autoRunning = collectVisibleSidebarDescendants(rootKey, runningByParent, NONE, {}, null);
     expect(autoRunning.isExpanded).toBe(true);
     expect(autoRunning.summary).toEqual({
       totalCount: 1,
@@ -182,6 +188,53 @@ describe("sidebar subagent tree", () => {
       attentionStatus: "working",
     });
     expect(autoRunning.rows.map((row) => row.threadKey)).toEqual([childKey]);
+  });
+
+  it("lets a parent whose idle children the shell left out expand and asks for its family", () => {
+    const rootId = ThreadId.make("root");
+    const childId = ThreadId.make("child");
+    const rootKey = scopedThreadKey(scopeThreadRef(localEnv, rootId));
+    const childKey = scopedThreadKey(scopeThreadRef(localEnv, childId));
+    const idleParents = new Set([rootKey, childKey]);
+    const shellOnly = buildSidebarChildThreadsByParent([makeThread({ id: rootId })], NONE);
+
+    const collapsed = collectVisibleSidebarDescendants(rootKey, shellOnly, idleParents, {}, null);
+    expect(collapsed).toMatchObject({ hasIdleChildren: true, isExpanded: false, familyKeys: [] });
+
+    const loading = collectVisibleSidebarDescendants(
+      rootKey,
+      shellOnly,
+      idleParents,
+      { [rootKey]: true },
+      null,
+    );
+    expect(loading).toMatchObject({ isExpanded: true, rows: [], familyKeys: [rootKey] });
+
+    const familyRows = buildSidebarChildThreadsByParent(
+      [
+        makeThread({ id: rootId }),
+        makeThread({
+          id: childId,
+          lineage: {
+            rootThreadId: rootId,
+            parentThreadId: rootId,
+            relationshipToParent: "subagent",
+          },
+        }),
+      ],
+      NONE,
+    );
+    const nested = collectVisibleSidebarDescendants(
+      rootKey,
+      familyRows,
+      idleParents,
+      { [rootKey]: true, [childKey]: true },
+      null,
+    );
+    expect(nested.rows.map((row) => [row.threadKey, row.hasIdleChildren, row.isExpanded])).toEqual([
+      [childKey, true, true],
+    ]);
+    expect(nested.familyKeys).toEqual([rootKey, childKey]);
   });
 
   it("handles parent cycles safely without looping", () => {
@@ -199,7 +252,7 @@ describe("sidebar subagent tree", () => {
       }),
     ];
     const byParent = buildSidebarChildThreadsByParent(threads, new Set());
-    const result = collectVisibleSidebarDescendants(aKey, byParent, { [aKey]: true }, null);
+    const result = collectVisibleSidebarDescendants(aKey, byParent, NONE, { [aKey]: true }, null);
     expect(result.summary.totalCount).toBe(1);
     expect(result.rows.map((row) => row.thread.id)).toEqual([bId]);
   });

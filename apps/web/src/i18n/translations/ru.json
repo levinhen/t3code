@@ -830,6 +830,7 @@
   "72cbd65a716e0c29": "{label} за {elapsed}",
   "964254ee2ab866a7": "субагент",
   "8cab38a22f2ae630": "{count, plural, one {{count} субагент} few {{count} субагента} many {{count} субагентов} other {{count} субагента}}",
+  "aff4cea85964d92a": "субагенты",
   "008059c2d5010b7e": "команда",
   "8ddc80d418356e05": "{count, plural, one {{count} команда} few {{count} команды} many {{count} команд} other {{count} команды}}",
   "50b3f7f149db4f51": "монитор",

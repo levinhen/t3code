@@ -643,6 +643,8 @@ type SidebarThreadRowProps = {
         readonly totalCount: number;
         readonly runningCount: number;
         readonly attentionStatus: "attention" | "failed" | "working" | null;
+        /** Idle children the shell left out load on expand, so the count is unknown until then. */
+        readonly hasIdleChildren: boolean;
         readonly expanded: boolean;
         readonly onToggle: (threadKey: string, currentlyExpanded: boolean) => void;
       }
@@ -1320,8 +1322,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </span>
   ) : null;
 
+  const subagentCountKnown =
+    props.subagentTree !== undefined &&
+    (!props.subagentTree.hasIdleChildren || props.subagentTree.expanded);
+  const subagentTreeLabel =
+    props.subagentTree === undefined
+      ? ""
+      : subagentCountKnown
+        ? gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
+            count: props.subagentTree.totalCount,
+          })
+        : gt("subagents");
   const subagentTreeToggle =
-    props.subagentTree && props.subagentTree.totalCount > 0 ? (
+    props.subagentTree !== undefined ? (
       <button
         type="button"
         data-sidebar-tree-toggle
@@ -1329,16 +1342,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         aria-expanded={props.subagentTree.expanded}
         aria-label={
           props.subagentTree.expanded
-            ? gt("Collapse {label}", {
-                label: gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
-                  count: props.subagentTree.totalCount,
-                }),
-              })
-            : gt("Expand {label}", {
-                label: gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
-                  count: props.subagentTree.totalCount,
-                }),
-              })
+            ? gt("Collapse {label}", { label: subagentTreeLabel })
+            : gt("Expand {label}", { label: subagentTreeLabel })
         }
         onPointerDown={(event) => event.stopPropagation()}
         onDoubleClick={(event) => event.stopPropagation()}
@@ -1372,7 +1377,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             )}
           />
         ) : null}
-        <span>{props.subagentTree.totalCount}</span>
+        {subagentCountKnown ? <span>{props.subagentTree.totalCount}</span> : null}
       </button>
     ) : null;
 

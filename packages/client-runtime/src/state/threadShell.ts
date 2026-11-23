@@ -770,6 +770,24 @@ export function createEnvironmentThreadShellAtoms(input: {
     return next;
   }).pipe(Atom.withLabel("environment-delegated-under-parent"));
 
+  let previousIdleSubagentParents: ReadonlySet<string> = new Set();
+  const idleSubagentParentsAtom = Atom.make((get) => {
+    const next = new Set<string>();
+    for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
+      for (const threadId of get(input.snapshotAtom(environmentId))?.idleSubagentParentIds ?? []) {
+        next.add(threadKey({ environmentId, threadId }));
+      }
+    }
+    if (
+      next.size === previousIdleSubagentParents.size &&
+      [...next].every((key) => previousIdleSubagentParents.has(key))
+    ) {
+      return previousIdleSubagentParents;
+    }
+    previousIdleSubagentParents = next;
+    return next;
+  }).pipe(Atom.withLabel("environment-idle-subagent-parents"));
+
   let previousNavigationShells: ReadonlyArray<EnvironmentThreadShell> = [];
   const navigationThreadShellsAtom = Atom.make((get) => {
     const next: EnvironmentThreadShell[] = [];
@@ -806,6 +824,8 @@ export function createEnvironmentThreadShellAtoms(input: {
     quietThreadShellsAtom,
     navigationThreadShellsAtom,
     delegatedUnderParentAtom,
+    /** Threads with idle subagent children the shell left out; read them with a thread family. */
+    idleSubagentParentsAtom,
     pendingSubagentRequestsAtom,
     threadShellsForProjectRefsAtom: (refs: ReadonlyArray<ScopedProjectRef>) =>
       threadShellsForProjectRefsAtomFamily(projectRefCollectionKey(refs)),

@@ -806,11 +806,13 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
       threads.map((thread) => thread.id),
     );
     assert.isUndefined(full?.olderSettled);
+    assert.isUndefined(full?.idleSubagentParentIds);
     const withoutChildren = yield* firstSnapshot({ omitIdleSubagents: true });
     assert.deepEqual(
       withoutChildren?.threads.map((thread) => thread.id),
       ["parent", "live", ...recent, "old", "remote-parent", "remote-child-parent"],
     );
+    assert.deepEqual(withoutChildren?.idleSubagentParentIds, [ThreadId.make("parent")]);
     // A linked environment's clients nest its task under its parent, so that parent stays: an
     // older settled thread or an idle subagent.
     const withoutOld = yield* firstSnapshot({ omitIdleSubagents: true, omitOlderSettled: true });

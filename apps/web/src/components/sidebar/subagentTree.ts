@@ -32,16 +32,17 @@ export interface SidebarDescendantRow<T extends SidebarTreeThread> {
   readonly parentKey: string;
   readonly depth: number;
   readonly childSummary: SidebarSubtreeSummary;
+  readonly hasIdleChildren: boolean;
   readonly isExpanded: boolean;
 }
 
-export const EMPTY_SUBTREE_SUMMARY: SidebarSubtreeSummary = {
+const EMPTY_SUBTREE_SUMMARY: SidebarSubtreeSummary = {
   totalCount: 0,
   runningCount: 0,
   attentionStatus: null,
 };
 
-export function resolveSidebarTreeParentKey(
+function resolveSidebarTreeParentKey(
   thread: Pick<
     SidebarTreeThread,
     "id" | "environmentId" | "archivedAt" | "lineage" | "delegatedFrom"
@@ -149,7 +150,7 @@ export function summarizeSidebarSubtree<T extends SidebarTreeThread>(
   };
 }
 
-export function isSidebarSubtreeExpanded(
+function isSidebarSubtreeExpanded(
   threadKey: string,
   expandedById: Readonly<Record<string, boolean>>,
   summary: SidebarSubtreeSummary,
@@ -187,19 +188,27 @@ function collectActiveAncestors<T extends SidebarTreeThread>(
   return activeAncestors;
 }
 
+/**
+ * `idleChildParents` are threads whose idle children the shell left out. They can expand before
+ * any child row is loaded; `familyKeys` lists the expanded ones, whose thread family to read.
+ */
 export function collectVisibleSidebarDescendants<T extends SidebarTreeThread>(
   rootKey: string,
   childrenByParent: ReadonlyMap<string, readonly T[]>,
+  idleChildParents: ReadonlySet<string>,
   expandedById: Readonly<Record<string, boolean>>,
   routeThreadKey: string | null,
 ): {
   readonly summary: SidebarSubtreeSummary;
+  readonly hasIdleChildren: boolean;
   readonly isExpanded: boolean;
   readonly rows: readonly SidebarDescendantRow<T>[];
+  readonly familyKeys: readonly string[];
 } {
   const summary = summarizeSidebarSubtree(rootKey, childrenByParent);
-  if (summary.totalCount === 0) {
-    return { summary, isExpanded: false, rows: [] };
+  const hasIdleChildren = idleChildParents.has(rootKey);
+  if (summary.totalCount === 0 && !hasIdleChildren) {
+    return { summary, hasIdleChildren, isExpanded: false, rows: [], familyKeys: [] };
   }
 
   const activeAncestors = collectActiveAncestors(rootKey, childrenByParent, routeThreadKey);
@@ -210,10 +219,11 @@ export function collectVisibleSidebarDescendants<T extends SidebarTreeThread>(
     activeAncestors.has(rootKey),
   );
   if (!rootExpanded) {
-    return { summary, isExpanded: false, rows: [] };
+    return { summary, hasIdleChildren, isExpanded: false, rows: [], familyKeys: [] };
   }
 
   const rows: SidebarDescendantRow<T>[] = [];
+  const familyKeys = hasIdleChildren ? [rootKey] : [];
   const visited = new Set<string>([rootKey]);
   const walk = (parentKey: string, depth: number) => {
     const children = childrenByParent.get(parentKey);
@@ -223,20 +233,23 @@ export function collectVisibleSidebarDescendants<T extends SidebarTreeThread>(
       if (visited.has(childKey)) continue;
       visited.add(childKey);
       const childSummary = summarizeSidebarSubtree(childKey, childrenByParent);
+      const childHasIdleChildren = idleChildParents.has(childKey);
       const childExpanded =
-        childSummary.totalCount > 0 &&
+        (childSummary.totalCount > 0 || childHasIdleChildren) &&
         isSidebarSubtreeExpanded(
           childKey,
           expandedById,
           childSummary,
           activeAncestors.has(childKey),
         );
+      if (childExpanded && childHasIdleChildren) familyKeys.push(childKey);
       rows.push({
         thread: child,
         threadKey: childKey,
         parentKey,
         depth,
         childSummary,
+        hasIdleChildren: childHasIdleChildren,
         isExpanded: childExpanded,
       });
       if (childExpanded) {
@@ -246,5 +259,5 @@ export function collectVisibleSidebarDescendants<T extends SidebarTreeThread>(
   };
   walk(rootKey, 1);
 
-  return { summary, isExpanded: true, rows };
+  return { summary, hasIdleChildren, isExpanded: true, rows, familyKeys };
 }
