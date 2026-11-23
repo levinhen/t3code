@@ -1,0 +1,365 @@
+import { toServerClock } from "@t3tools/client-runtime/clock";
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { formatWorkingDurationLabel } from "@t3tools/client-runtime/state/models";
+import { resolveThreadActivityTimestamp } from "@t3tools/client-runtime/state/thread-sort";
+import {
+  type ContextMenuSource,
+  type EnvironmentId,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
+import {
+  BotIcon,
+  ChevronRightIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
+  CircleDashedIcon,
+  FolderGit2Icon,
+  GitBranchIcon,
+  MessageCircleQuestionIcon,
+  MessagesSquareIcon,
+  ShieldQuestionIcon,
+} from "lucide-react";
+import {
+  memo,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import { msg, useGT, useMessages } from "gt-react";
+
+import type { MessageResolver } from "../../i18n/messages";
+import { contextMenuSourceOf } from "../../contextMenuSource";
+import { useNowMinute } from "../../hooks/useNowMinute";
+import { useNowSecond } from "../../hooks/useNowSecond";
+import { shouldShowInstanceBadge } from "../../providerInstances";
+import { useThreadShell } from "../../state/entities";
+import { formatRelativeTime } from "../../timestampFormat";
+import type { SidebarThreadSummary } from "../../types";
+import { cn } from "~/lib/utils";
+import { textDirection } from "~/textDirection";
+import { formatWorktreePathForDisplay } from "../../worktreeCleanup";
+import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import { getTriggerDisplayModelName } from "../chat/providerIconUtils";
+import { resolveSidebarThreadStatus, resolveWorkingStartedAt } from "../Sidebar.logic";
+import { ThreadHoverCard, ThreadHoverCardPopup } from "../ThreadHoverCard";
+import { MiddleTruncate } from "../ui/middle-truncate";
+import { Tooltip, TooltipTrigger } from "../ui/tooltip";
+import type { SidebarProviderEntry } from "./SidebarThreadRow";
+import type { SidebarSubtreeSummary } from "./subagentTree";
+
+function compactTimeLabel(timestamp: string, nowMs: number, resolve: MessageResolver) {
+  const parts = formatRelativeTime(timestamp, nowMs, resolve);
+  if (parts === null) return "";
+  return parts.suffix === null ? resolve(msg("now", { $context: "relative time" })) : parts.value;
+}
+
+function SubagentRelativeTime(props: { timestamp: string | null }) {
+  const nowMinute = useNowMinute();
+  const messages = useMessages();
+  return props.timestamp === null
+    ? null
+    : compactTimeLabel(props.timestamp, Date.parse(`${nowMinute}:00.000Z`), messages);
+}
+
+function SubagentWorkingDuration(props: {
+  environmentId: EnvironmentId;
+  startedAt: string | null;
+}) {
+  const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
+  if (Number.isNaN(startedMs)) return null;
+  return <SubagentWorkingDurationTick environmentId={props.environmentId} startedMs={startedMs} />;
+}
+
+function SubagentWorkingDurationTick(props: { environmentId: EnvironmentId; startedMs: number }) {
+  const nowMs = useNowSecond();
+  const messages = useMessages();
+  return (
+    <span className="tabular-nums">
+      {formatWorkingDurationLabel(
+        toServerClock(props.environmentId, nowMs) - props.startedMs,
+        messages,
+      )}
+    </span>
+  );
+}
+
+const SUBTREE_DOT_CLASS = {
+  attention: "bg-warning",
+  failed: "bg-error",
+  working: "bg-info",
+} as const;
+
+export interface SidebarSubagentTreeRowProps {
+  readonly thread: SidebarThreadSummary;
+  readonly parentKey: string;
+  readonly depth: number;
+  readonly childSummary: SidebarSubtreeSummary;
+  readonly isExpanded: boolean;
+  readonly isActive: boolean;
+  readonly revealRef?:
+    | ((row: HTMLElement, threadKey: string) => (() => void) | undefined)
+    | undefined;
+  readonly providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
+  readonly onToggleExpand: (threadKey: string, currentlyExpanded: boolean) => void;
+  readonly onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
+  readonly onThreadActivate: (threadRef: ScopedThreadRef) => void;
+  readonly onContextMenu: (
+    threadRef: ScopedThreadRef,
+    position: { x: number; y: number },
+    source: ContextMenuSource,
+  ) => void;
+}
+
+export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
+  props: SidebarSubagentTreeRowProps,
+) {
+  const gt = useGT();
+  const threadRef = scopeThreadRef(props.thread.environmentId, props.thread.id);
+  const threadKey = scopedThreadKey(threadRef);
+  const thread = useThreadShell(threadRef) ?? props.thread;
+  const status = resolveSidebarThreadStatus(thread);
+  const isWorking = status === "working" || status === "preparing";
+  const isSideChat = thread.lineage.sideChat === true;
+
+  const modelInstanceId = thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
+  const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
+  const showInstanceBadge =
+    providerEntry !== null &&
+    shouldShowInstanceBadge(providerEntry, props.providerEntryByInstanceId.values());
+  const selectedModel = providerEntry?.models.find(
+    (model) => model.slug === thread.modelSelection.model,
+  );
+  const modelLabel = selectedModel
+    ? getTriggerDisplayModelName(selectedModel, providerEntry?.driverKind)
+    : thread.modelSelection.model;
+
+  const statusDotClass = isWorking
+    ? "bg-info"
+    : status === "approval" || status === "input" || status === "request" || status === "limited"
+      ? "bg-warning"
+      : status === "failed"
+        ? "bg-error"
+        : thread.latestRun?.status === "completed"
+          ? "bg-success/80"
+          : "bg-muted-foreground/45";
+
+  const hasChildren = props.childSummary.totalCount > 0;
+  const cappedDepth = Math.min(props.depth, 5);
+  const indentPx = 12 + (cappedDepth - 1) * 14;
+  const { revealRef } = props;
+  const rowRef = (row: HTMLElement | null) =>
+    row === null ? undefined : revealRef?.(row, threadKey);
+
+  const handleKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    props.onThreadActivate(threadRef);
+  };
+
+  const handleToggleClick = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    props.onToggleExpand(threadKey, props.isExpanded);
+  };
+
+  const worktreePath = thread.worktreePath?.trim();
+  const guideLevels = Array.from({ length: cappedDepth }, (_, index) => index);
+
+  return (
+    <li
+      data-subagent-tree-item={threadKey}
+      data-subagent-depth={props.depth}
+      className="relative list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(7.5)]"
+    >
+      {guideLevels.map((level) => (
+        <span
+          key={level}
+          aria-hidden
+          style={{ left: `${10 + level * 14}px` }}
+          className="pointer-events-none absolute inset-y-0 w-px bg-sidebar-border/65"
+        />
+      ))}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <div
+              ref={rowRef}
+              role="button"
+              tabIndex={0}
+              data-sidebar-row={threadKey}
+              data-sidebar-parent={props.parentKey}
+              data-testid="sidebar-subagent-row"
+              aria-current={props.isActive ? "page" : undefined}
+              style={{ paddingLeft: `${indentPx}px` }}
+              className={cn(
+                "group/subagent-row relative flex h-7.5 w-full cursor-pointer items-center gap-1.5 rounded-md pr-2 text-left text-xs outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                props.isActive
+                  ? "bg-sidebar-row-active text-sidebar-foreground light:ring-1 light:ring-inset light:ring-sidebar-border/70"
+                  : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+              )}
+              onClick={(event) => props.onThreadClick(event, threadRef)}
+              onKeyDown={handleKeyDown}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                props.onContextMenu(
+                  threadRef,
+                  { x: event.clientX, y: event.clientY },
+                  contextMenuSourceOf(event),
+                );
+              }}
+            />
+          }
+        >
+          {hasChildren ? (
+            <button
+              type="button"
+              data-sidebar-tree-toggle
+              data-testid="sidebar-subagent-tree-toggle"
+              aria-expanded={props.isExpanded}
+              aria-label={
+                props.isExpanded
+                  ? gt("Collapse {label}", {
+                      label: gt(
+                        "{count, plural, one {{count} subagent} other {{count} subagents}}",
+                        { count: props.childSummary.totalCount },
+                      ),
+                    })
+                  : gt("Expand {label}", {
+                      label: gt(
+                        "{count, plural, one {{count} subagent} other {{count} subagents}}",
+                        { count: props.childSummary.totalCount },
+                      ),
+                    })
+              }
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={handleToggleClick}
+              className="-ml-1 inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
+            >
+              <ChevronRightIcon
+                aria-hidden
+                className={cn("size-3 transition-transform", props.isExpanded && "rotate-90")}
+              />
+            </button>
+          ) : (
+            <span aria-hidden className="h-px w-2 shrink-0 bg-sidebar-border/70" />
+          )}
+          <span className="relative inline-flex size-3.5 shrink-0 items-center justify-center">
+            {providerEntry ? (
+              <ProviderInstanceIcon
+                driverKind={providerEntry.driverKind}
+                displayName={providerEntry.displayName}
+                accentColor={providerEntry.accentColor}
+                acpRegistryAgentId={providerEntry.acpRegistryAgentId}
+                acpRegistryIconUrl={providerEntry.acpRegistryIconUrl}
+                showBadge={false}
+                size="compact"
+                iconClassName="size-3.5 opacity-75"
+              />
+            ) : isSideChat ? (
+              <MessagesSquareIcon aria-hidden className="size-3.5 text-muted-foreground" />
+            ) : (
+              <BotIcon aria-hidden className="size-3.5 text-muted-foreground" />
+            )}
+            <span
+              aria-hidden
+              className={cn(
+                "absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full ring-1 ring-sidebar",
+                statusDotClass,
+              )}
+            />
+          </span>
+          <span
+            dir={textDirection(thread.title)}
+            className={cn(
+              "min-w-0 flex-1 truncate",
+              props.isActive ? "font-medium text-sidebar-foreground" : "font-normal",
+            )}
+          >
+            {thread.title}
+          </span>
+          {hasChildren && !props.isExpanded ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-sidebar-control-surface/70 px-1 py-px text-2xs tabular-nums text-sidebar-muted-foreground">
+              {props.childSummary.attentionStatus ? (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    SUBTREE_DOT_CLASS[props.childSummary.attentionStatus],
+                  )}
+                />
+              ) : null}
+              {props.childSummary.totalCount}
+            </span>
+          ) : null}
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-2xs text-secondary-label tabular-nums">
+            {isWorking ? (
+              <span className="inline-flex items-center gap-1 font-medium text-info-foreground">
+                <CircleDashedIcon aria-hidden className="size-3 shrink-0" />
+                <SubagentWorkingDuration
+                  environmentId={thread.environmentId}
+                  startedAt={resolveWorkingStartedAt(thread)}
+                />
+              </span>
+            ) : status === "approval" ? (
+              <ShieldQuestionIcon aria-hidden className="size-3 text-warning-foreground" />
+            ) : status === "input" ? (
+              <MessageCircleQuestionIcon aria-hidden className="size-3 text-warning-foreground" />
+            ) : status === "failed" ? (
+              <CircleAlertIcon aria-hidden className="size-3 text-error-foreground" />
+            ) : thread.latestRun?.status === "completed" ? (
+              <>
+                <CircleCheckIcon aria-hidden className="size-3 text-success-foreground/75" />
+                <SubagentRelativeTime timestamp={resolveThreadActivityTimestamp(thread)} />
+              </>
+            ) : (
+              <SubagentRelativeTime timestamp={resolveThreadActivityTimestamp(thread)} />
+            )}
+          </span>
+        </TooltipTrigger>
+        <ThreadHoverCardPopup side="right" align="start" sideOffset={4}>
+          <ThreadHoverCard title={thread.title}>
+            {providerEntry ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <ProviderInstanceIcon
+                  driverKind={providerEntry.driverKind}
+                  displayName={providerEntry.displayName}
+                  accentColor={providerEntry.accentColor}
+                  acpRegistryAgentId={providerEntry.acpRegistryAgentId}
+                  acpRegistryIconUrl={providerEntry.acpRegistryIconUrl}
+                  showBadge={showInstanceBadge && providerEntry.accentColor !== undefined}
+                  badgeContent="none"
+                  badgeClassName="h-2 min-w-2 px-0"
+                  iconClassName="size-3 shrink-0 opacity-60"
+                />
+                <div className="min-w-0 truncate text-foreground/75">
+                  {showInstanceBadge ? `${modelLabel} · ${providerEntry.displayName}` : modelLabel}
+                </div>
+              </div>
+            ) : null}
+            {thread.branch ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <GitBranchIcon className="size-3 shrink-0 stroke-muted-foreground" />
+                <MiddleTruncate value={thread.branch} className="flex" />
+              </div>
+            ) : null}
+            {worktreePath ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <FolderGit2Icon className="size-3 shrink-0 stroke-muted-foreground" />
+                <MiddleTruncate
+                  value={formatWorktreePathForDisplay(worktreePath)}
+                  className="flex"
+                />
+              </div>
+            ) : null}
+            {thread.runtime?.lastError ? (
+              <div className="flex min-w-0 items-center gap-2 text-error">
+                <CircleAlertIcon className="size-3 shrink-0 stroke-current" />
+                <div className="min-w-0 truncate">{thread.runtime.lastError}</div>
+              </div>
+            ) : null}
+          </ThreadHoverCard>
+        </ThreadHoverCardPopup>
+      </Tooltip>
+    </li>
+  );
+});

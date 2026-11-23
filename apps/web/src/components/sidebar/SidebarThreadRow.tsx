@@ -43,6 +43,7 @@ import {
   AlarmClockOffIcon,
   ArrowRightLeftIcon,
   CheckIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
@@ -637,6 +638,15 @@ type SidebarThreadRowProps = {
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
+  subagentTree?:
+    | {
+        readonly totalCount: number;
+        readonly runningCount: number;
+        readonly attentionStatus: "attention" | "failed" | "working" | null;
+        readonly expanded: boolean;
+        readonly onToggle: (threadKey: string, currentlyExpanded: boolean) => void;
+      }
+    | undefined;
 };
 
 // Mounted only while renaming, so each rename starts uncommitted.
@@ -1310,6 +1320,62 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </span>
   ) : null;
 
+  const subagentTreeToggle =
+    props.subagentTree && props.subagentTree.totalCount > 0 ? (
+      <button
+        type="button"
+        data-sidebar-tree-toggle
+        data-testid="sidebar-subagent-tree-toggle"
+        aria-expanded={props.subagentTree.expanded}
+        aria-label={
+          props.subagentTree.expanded
+            ? gt("Collapse {label}", {
+                label: gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
+                  count: props.subagentTree.totalCount,
+                }),
+              })
+            : gt("Expand {label}", {
+                label: gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
+                  count: props.subagentTree.totalCount,
+                }),
+              })
+        }
+        onPointerDown={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          props.subagentTree?.onToggle(threadKey, props.subagentTree.expanded);
+        }}
+        className={cn(
+          "inline-flex h-4.5 shrink-0 cursor-pointer items-center gap-0.5 rounded-sm bg-sidebar-control-surface/75 px-1 text-2xs font-medium tabular-nums text-sidebar-muted-foreground transition-colors hover:bg-sidebar-control-surface hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          props.subagentTree.expanded && "text-sidebar-foreground",
+        )}
+      >
+        <ChevronRightIcon
+          aria-hidden
+          className={cn(
+            "size-3 shrink-0 transition-transform",
+            props.subagentTree.expanded && "rotate-90",
+          )}
+        />
+        {props.subagentTree.attentionStatus !== null ? (
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              props.subagentTree.attentionStatus === "attention"
+                ? "bg-warning"
+                : props.subagentTree.attentionStatus === "failed"
+                  ? "bg-error"
+                  : "bg-info",
+            )}
+          />
+        ) : null}
+        <span>{props.subagentTree.totalCount}</span>
+      </button>
+    ) : null;
+
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
     const inFolder = variant === "folder" || multiline;
@@ -1368,6 +1434,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 </span>
               )}
               {draftIndicator}
+              {subagentTreeToggle}
               {title}
               {multiline ? titleLineIcons : null}
               {pinIndicator}
@@ -1715,6 +1782,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.sweepAction !== null ? dragDestination : null}
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5">
+              {subagentTreeToggle}
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">

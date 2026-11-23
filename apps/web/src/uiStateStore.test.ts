@@ -22,6 +22,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     sidebarProjectScopeKeys: [],
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
+    threadSubtreeExpandedById: {},
     defaultAdvertisedEndpointKey: null,
     pullRequestMergeMethod: "merge",
     ...overrides,
@@ -114,6 +115,10 @@ describe("parsePersistedState", () => {
           "turn-2": true,
         },
       },
+      threadSubtreeExpandedById: {
+        "environment:thread-1": true,
+        invalid: "nope" as unknown as boolean,
+      },
     });
 
     expect(parsed).toEqual({
@@ -132,6 +137,9 @@ describe("parsePersistedState", () => {
           "turn-1": false,
           "turn-2": true,
         },
+      },
+      threadSubtreeExpandedById: {
+        "environment:thread-1": true,
       },
     });
   });
@@ -245,6 +253,7 @@ describe("uiStateStore persistence", () => {
           "turn-2": true,
         },
       },
+      threadSubtreeExpandedById: {},
       pullRequestMergeMethod: "merge",
     });
     expect(parsePersistedState(persisted)).toEqual({

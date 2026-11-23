@@ -513,3 +513,92 @@ describe("sidebar settled pagination", () => {
     expect(screen.container.querySelectorAll("[data-thread-item]")).toHaveLength(loadedRows);
   });
 });
+
+describe("sidebar subagent tree", () => {
+  it("expands and collapses nested subagent threads under their parent row", async () => {
+    const activeProject = project("active");
+    const rootThread = makeThreadFixture({
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+      id: ThreadId.make("tree-root"),
+      title: "Parent thread",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const childThread = makeThreadFixture({
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+      id: ThreadId.make("tree-child"),
+      title: "Child subagent",
+      createdAt: "2026-01-01T00:01:00.000Z",
+      lineage: {
+        rootThreadId: rootThread.id,
+        parentThreadId: rootThread.id,
+        relationshipToParent: "subagent",
+      },
+    });
+    const grandchildThread = makeThreadFixture({
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+      id: ThreadId.make("tree-grandchild"),
+      title: "Grandchild subagent",
+      createdAt: "2026-01-01T00:02:00.000Z",
+      lineage: {
+        rootThreadId: rootThread.id,
+        parentThreadId: childThread.id,
+        relationshipToParent: "subagent",
+      },
+    });
+    const rootRef = { environmentId: activeProject.environmentId, threadId: rootThread.id };
+    vi.mocked(useProjects).mockReturnValue([activeProject]);
+    vi.mocked(useQuietThreadShells).mockReturnValue([rootThread, childThread, grandchildThread]);
+    vi.mocked(useThreadRouteTarget).mockReturnValue({ kind: "server", threadRef: rootRef });
+    vi.mocked(useHandleNewThread).mockReturnValue({
+      activeDraftThread: null,
+      activeThread: null,
+      defaultProjectRef: {
+        environmentId: activeProject.environmentId,
+        projectId: activeProject.id,
+      },
+      defaultProjectFallbackReady: true,
+      handleNewThread: vi.fn().mockResolvedValue(null),
+      routeDraftId: null,
+      routeThreadRef: rootRef,
+    });
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+    await expect.element(screen.getByText("Parent thread")).toBeInTheDocument();
+    expect(screen.container.querySelectorAll('[data-testid="sidebar-subagent-row"]')).toHaveLength(
+      0,
+    );
+
+    const rootToggle = screen.container.querySelector<HTMLButtonElement>(
+      '[data-testid="sidebar-subagent-tree-toggle"]',
+    )!;
+    expect(rootToggle.textContent).toContain("2");
+    await userEvent.click(rootToggle);
+
+    await expect.element(screen.getByText("Child subagent")).toBeInTheDocument();
+    expect(screen.container.querySelectorAll('[data-testid="sidebar-subagent-row"]')).toHaveLength(
+      1,
+    );
+
+    const childToggle = screen.container.querySelector<HTMLButtonElement>(
+      '[data-testid="sidebar-subagent-row"] [data-testid="sidebar-subagent-tree-toggle"]',
+    )!;
+    await userEvent.click(childToggle);
+    await expect.element(screen.getByText("Grandchild subagent")).toBeInTheDocument();
+    expect(screen.container.querySelectorAll('[data-testid="sidebar-subagent-row"]')).toHaveLength(
+      2,
+    );
+
+    await userEvent.click(rootToggle);
+    await vi.waitFor(() => {
+      expect(
+        screen.container.querySelectorAll('[data-testid="sidebar-subagent-row"]'),
+      ).toHaveLength(0);
+    });
+  });
+});
