@@ -1,6 +1,10 @@
 import appCss from "../index.css?inline";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopeProjectRef,
+  scopeThreadRef,
+  scopedThreadKey,
+} from "@t3tools/client-runtime/environment";
 import * as shelfHooks from "../state/olderSettledShelf";
 import { createWorkspaceFocusController, workspaceAreaProps } from "../lib/workspaceFocus";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -24,7 +28,12 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { __setClientSettingsForTests, getClientSettings } from "../hooks/useSettings";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
-import { useProjects, useServerConfigs, useQuietThreadShells } from "../state/entities";
+import {
+  useIdleSubagents,
+  useProjects,
+  useServerConfigs,
+  useQuietThreadShells,
+} from "../state/entities";
 import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/environments";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
@@ -661,5 +670,55 @@ describe("sidebar subagent tree", () => {
         screen.container.querySelectorAll('[data-testid="sidebar-subagent-row"]'),
       ).toHaveLength(0);
     });
+  });
+
+  it("counts the idle children the shell left out without loading them", async () => {
+    const activeProject = project("active");
+    const rootThread = makeThreadFixture({
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+      id: ThreadId.make("idle-root"),
+      title: "Parent with idle subagents",
+    });
+    const rootRef = { environmentId: activeProject.environmentId, threadId: rootThread.id };
+    const key = (threadId: string) =>
+      scopedThreadKey(scopeThreadRef(activeProject.environmentId, ThreadId.make(threadId)));
+    vi.mocked(useProjects).mockReturnValue([activeProject]);
+    vi.mocked(useQuietThreadShells).mockReturnValue([rootThread]);
+    vi.mocked(useIdleSubagents).mockReturnValue(
+      new Map([
+        [
+          key("idle-root"),
+          {
+            threadKeys: [key("idle-a"), key("idle-b"), key("idle-c")],
+            providerInstanceIds: [rootThread.modelSelection.instanceId],
+          },
+        ],
+      ]),
+    );
+    vi.mocked(useThreadRouteTarget).mockReturnValue({ kind: "server", threadRef: rootRef });
+    vi.mocked(useHandleNewThread).mockReturnValue({
+      activeDraftThread: null,
+      activeThread: null,
+      defaultProjectRef: {
+        environmentId: activeProject.environmentId,
+        projectId: activeProject.id,
+      },
+      defaultProjectFallbackReady: true,
+      handleNewThread: vi.fn().mockResolvedValue(null),
+      routeDraftId: null,
+      routeThreadRef: rootRef,
+    });
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+    await expect.element(screen.getByText("Parent with idle subagents")).toBeInTheDocument();
+    const toggle = screen.container.querySelector<HTMLButtonElement>(
+      '[data-testid="sidebar-subagent-tree-toggle"]',
+    )!;
+    expect(toggle.textContent).toContain("3");
+    expect(toggle.getAttribute("aria-label")).toBe("Expand 3 subagents");
   });
 });

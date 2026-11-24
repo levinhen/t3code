@@ -107,6 +107,69 @@ const traceSqlStatements = () => {
   return { statements, tracer, queryTransactions };
 };
 
+it.effect("the shell index names subagent providers and still scans its expression index", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const now = DateTime.makeUnsafe("2026-11-20T00:00:00.000Z");
+    const parentId = ThreadId.make("thread:index-parent");
+    const childId = ThreadId.make("thread:index-child");
+    const claude = ProviderInstanceId.make("claudeAgent");
+    const create = (threadId: ThreadId, child: boolean) =>
+      store.apply({
+        id: EventId.make(`event:${threadId}:created`),
+        type: "thread.created",
+        threadId,
+        occurredAt: now,
+        payload: {
+          createdBy: "user",
+          creationSource: "web",
+          id: threadId,
+          projectId: ProjectId.make("project:index"),
+          title: threadId,
+          providerInstanceId: child ? claude : providerInstanceId,
+          modelSelection: child
+            ? { instanceId: claude, model: "claude-haiku-5-5" }
+            : modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: child
+            ? { parentThreadId: parentId, relationshipToParent: "subagent", rootThreadId: parentId }
+            : { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+      });
+    yield* create(parentId, false);
+    yield* create(childId, true);
+    const { statements, tracer } = traceSqlStatements();
+    const index = yield* store.listActiveShellIndex().pipe(Effect.withTracer(tracer));
+    assert.sameDeepMembers(
+      index.map((row) => [row.id, row.providerInstanceId]),
+      [
+        [parentId, undefined],
+        [childId, claude],
+      ],
+    );
+    yield* assertShellIndexCoversShells();
+    const sql = yield* SqlClient.SqlClient;
+    assert.lengthOf(statements, 1);
+    const plan = (yield* sql.unsafe<{ readonly detail: string }>(
+      `EXPLAIN QUERY PLAN ${statements[0]!}`,
+      [],
+    )).map((row) => row.detail);
+    assert.include(plan, "SCAN t USING INDEX orchestration_v2_projection_threads_active_shell_idx");
+  }).pipe(Effect.provide(layerTest)),
+);
+
 /** The shell index flags every live shell and matches its shells on the fields subscriber trims read. */
 const assertShellIndexCoversShells = Effect.fnUntraced(function* () {
   const store = yield* ProjectionStore.ProjectionStoreV2;
@@ -169,6 +232,12 @@ const assertShellIndexCoversShells = Effect.fnUntraced(function* () {
     snoozedUntil: iso(row.snoozedUntil),
   });
   assert.deepEqual(index.map(trimmed), shells.map(trimmed));
+  assert.deepEqual(
+    index.map((row) => row.providerInstanceId),
+    shells.map((shell) =>
+      shell.lineage.relationshipToParent === "subagent" ? shell.providerInstanceId : undefined,
+    ),
+  );
   shells.forEach((shell, position) => {
     if (isLiveSubagentShell(shell)) assert.isTrue(index[position]?.mayBeLive, shell.id);
   });

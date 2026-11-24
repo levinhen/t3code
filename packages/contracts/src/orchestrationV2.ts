@@ -2554,12 +2554,20 @@ export const OrchestrationV2ThreadShellSnapshot = Schema.Struct({
 });
 export type OrchestrationV2ThreadShellSnapshot = typeof OrchestrationV2ThreadShellSnapshot.Type;
 
+/** A parent's idle subagent children that `omitIdleSubagents` left out; `getThreadFamily` reads their rows. */
+export const OrchestrationV2IdleSubagents = Schema.Struct({
+  parentThreadId: ThreadId,
+  threadIds: Schema.Array(ThreadId),
+  /** The distinct providers of `threadIds`, so a client can show them without reading the rows. */
+  providerInstanceIds: Schema.Array(ProviderInstanceId),
+});
+export type OrchestrationV2IdleSubagents = typeof OrchestrationV2IdleSubagents.Type;
+
 export const OrchestrationV2ShellSnapshot = Schema.Struct({
   ...OrchestrationV2ThreadShellSnapshot.fields,
   projects: Schema.Array(OrchestrationProjectShell),
   olderSettled: Schema.optionalKey(OrchestrationV2OlderSettledThreads),
-  /** Threads whose idle subagent children `omitIdleSubagents` left out; `getThreadFamily` reads them. */
-  idleSubagentParentIds: Schema.optionalKey(Schema.Array(ThreadId)),
+  idleSubagents: Schema.optionalKey(Schema.Array(OrchestrationV2IdleSubagents)),
 });
 export type OrchestrationV2ShellSnapshot = typeof OrchestrationV2ShellSnapshot.Type;
 

@@ -12,6 +12,7 @@ import type {
 import {
   EMPTY_THREAD_HISTORY_META,
   type EnvironmentThreadStatus,
+  type IdleSubagentChildren,
   type ThreadHistoryMeta,
 } from "@t3tools/client-runtime/state/threads";
 import {
@@ -145,8 +146,8 @@ export function useDelegatedUnderParent(): ReadonlySet<string> {
   return useAtomValue(environmentThreadShells.delegatedUnderParentAtom);
 }
 
-export function useIdleSubagentParents(): ReadonlySet<string> {
-  return useAtomValue(environmentThreadShells.idleSubagentParentsAtom);
+export function useIdleSubagents(): ReadonlyMap<string, IdleSubagentChildren> {
+  return useAtomValue(environmentThreadShells.idleSubagentsAtom);
 }
 
 export function useThreadShellsForProjectRefs(

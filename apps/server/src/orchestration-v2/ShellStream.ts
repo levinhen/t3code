@@ -1,6 +1,7 @@
 import type {
   ApplicationStoredEvent,
   OrchestrationProjectShell,
+  OrchestrationV2IdleSubagents,
   OrchestrationV2OlderSettledCount,
   OrchestrationV2OlderSettledThreads,
   OrchestrationV2ShellSnapshot,
@@ -9,6 +10,7 @@ import type {
   OrchestrationV2ShellStreamItem,
   OrchestrationV2StoredEvent,
   ProjectId,
+  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -180,7 +182,7 @@ function buildActiveShellSnapshot(input: {
 type ShellTrimRow = Pick<
   OrchestrationV2ThreadShell,
   "id" | "projectId" | "lineage" | "settledOverride" | "settledAt"
-> & { readonly hasRemoteTasks?: boolean };
+> & { readonly hasRemoteTasks?: boolean; readonly providerInstanceId?: ProviderInstanceId };
 
 /**
  * What a subscriber's trims read across every active row. Computed from full shells or from the
@@ -189,7 +191,9 @@ type ShellTrimRow = Pick<
 interface ShellTrimFacts {
   readonly subagentParentIds: ReadonlySet<string>;
   readonly subagentThreadIds: Set<string>;
-  readonly subagentParentById: ReadonlyMap<string, ThreadId>;
+  readonly subagents: ReadonlyArray<
+    Pick<ShellTrimRow, "id" | "providerInstanceId"> & { readonly parentThreadId: ThreadId }
+  >;
   /** Only the store's index knows these; shells alone leave it empty. */
   readonly remoteTaskParentIds: ReadonlySet<string>;
   /** Undefined when no thread is settled, so none is older. */
@@ -202,7 +206,7 @@ const NEWEST_SETTLED_KEPT = 25;
 function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
   const subagentParentIds = new Set<string>();
   const subagentThreadIds = new Set<string>();
-  const subagentParentById = new Map<string, ThreadId>();
+  const subagents: Array<ShellTrimFacts["subagents"][number]> = [];
   const remoteTaskParentIds = new Set<string>();
   const settledTimes: Array<number> = [];
   for (const row of rows) {
@@ -211,7 +215,13 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
       subagentThreadIds.add(row.id);
       if (row.lineage.parentThreadId) {
         subagentParentIds.add(row.lineage.parentThreadId);
-        subagentParentById.set(row.id, row.lineage.parentThreadId);
+        subagents.push({
+          id: row.id,
+          parentThreadId: row.lineage.parentThreadId,
+          ...(row.providerInstanceId === undefined
+            ? {}
+            : { providerInstanceId: row.providerInstanceId }),
+        });
       }
     } else if (
       isListedThreadLineage(row.lineage) &&
@@ -235,7 +245,7 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
   return {
     subagentParentIds,
     subagentThreadIds,
-    subagentParentById,
+    subagents,
     remoteTaskParentIds,
     olderSettledBeforeMs,
     olderSettledCounts: Array.from(counts, ([projectId, count]) => ({ projectId, count })),
@@ -364,7 +374,7 @@ function trimShellSnapshot(
     ? omitIdleSubagentShellsWith(base.threads, facts)
     : base.threads;
   const trimmed: OrchestrationV2ShellSnapshot = options.omitIdleSubagents
-    ? { ...base, threads, idleSubagentParentIds: omittedSubagentParentIds(threads, facts) }
+    ? { ...base, threads, idleSubagents: omittedIdleSubagents(threads, facts) }
     : { ...base, threads };
   if (!options.omitOlderSettled) return trimmed;
   const older = omitOlderSettledShellsWith(
@@ -374,16 +384,33 @@ function trimShellSnapshot(
   return { ...trimmed, threads: older.threads, olderSettled: older.olderSettled };
 }
 
-function omittedSubagentParentIds(
+/** The subagents the trim left out, by parent, so clients count and name them without their rows. */
+function omittedIdleSubagents(
   kept: ReadonlyArray<Pick<OrchestrationV2ThreadShell, "id">>,
-  facts: Pick<ShellTrimFacts, "subagentParentById">,
-): ReadonlyArray<ThreadId> {
+  facts: Pick<ShellTrimFacts, "subagents">,
+): ReadonlyArray<OrchestrationV2IdleSubagents> {
   const keptIds = new Set<string>(kept.map((thread) => thread.id));
-  const parentIds = new Set<ThreadId>();
-  for (const [threadId, parentId] of facts.subagentParentById) {
-    if (!keptIds.has(threadId)) parentIds.add(parentId);
+  const byParent = new Map<
+    ThreadId,
+    { readonly threadIds: Array<ThreadId>; readonly providerInstanceIds: Set<ProviderInstanceId> }
+  >();
+  for (const subagent of facts.subagents) {
+    if (keptIds.has(subagent.id)) continue;
+    let entry = byParent.get(subagent.parentThreadId);
+    if (entry === undefined) {
+      entry = { threadIds: [], providerInstanceIds: new Set() };
+      byParent.set(subagent.parentThreadId, entry);
+    }
+    entry.threadIds.push(subagent.id);
+    if (subagent.providerInstanceId !== undefined) {
+      entry.providerInstanceIds.add(subagent.providerInstanceId);
+    }
   }
-  return [...parentIds];
+  return Array.from(byParent, ([parentThreadId, entry]) => ({
+    parentThreadId,
+    threadIds: entry.threadIds,
+    providerInstanceIds: [...entry.providerInstanceIds],
+  }));
 }
 
 /**

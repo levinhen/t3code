@@ -830,7 +830,6 @@
   "72cbd65a716e0c29": "{label} ({elapsed})",
   "964254ee2ab866a7": "서브에이전트",
   "8cab38a22f2ae630": "{count, plural, other {서브에이전트 {count}개}}",
-  "aff4cea85964d92a": "서브에이전트",
   "008059c2d5010b7e": "명령",
   "8ddc80d418356e05": "{count, plural, other {명령 {count}개}}",
   "50b3f7f149db4f51": "모니터",

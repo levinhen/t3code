@@ -516,6 +516,8 @@ export interface ActiveShellIndexEntry extends Pick<
   | "pinOrderKey"
   | "snoozedUntil"
 > {
+  /** Read for subagents only, which a shell snapshot can leave out and still name by provider. */
+  readonly providerInstanceId?: ProviderInstanceId;
   /** False only when no run, request, work item, or watch can make the shell live. */
   readonly mayBeLive: boolean;
   /** Whether it delegated a task to a linked environment, whose clients nest that task under it. */
@@ -9560,6 +9562,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly pinned_at: string | null;
         readonly pin_order_key: string | null;
         readonly snoozed_until: string | null;
+        readonly provider_instance_id: string | null;
         readonly may_be_live: number;
         readonly has_remote_tasks: number;
       }>`
@@ -9575,6 +9578,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           ${indexedField("$.pinnedAt")} AS pinned_at,
           ${indexedField("$.pinOrderKey")} AS pin_order_key,
           ${indexedField("$.snoozedUntil")} AS snoozed_until,
+          -- Only a subagent reads its payload, as a pull request link does below: a snapshot can
+          -- leave it out and still name its provider.
+          CASE WHEN ${indexedField("$.lineage.relationshipToParent")} = 'subagent'
+            THEN json_extract(t.payload_json, '$.providerInstanceId')
+          END AS provider_instance_id,
           -- A superset of isLiveSubagentShell: the sources of its run status, pending request,
           -- and pending background work. Each source is one list for the whole read, found
           -- through its partial index, so finished threads cost no lookups.
@@ -9630,6 +9638,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return rows.map((row): ActiveShellIndexEntry => ({
         id: ThreadId.make(row.thread_id),
         projectId: ProjectId.make(row.project_id),
+        ...(row.provider_instance_id === null
+          ? {}
+          : { providerInstanceId: ProviderInstanceId.make(row.provider_instance_id) }),
         lineage: shellIndexLineage(row),
         settledOverride:
           row.settled_override === "settled" || row.settled_override === "active"

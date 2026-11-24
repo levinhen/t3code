@@ -111,8 +111,6 @@ export interface SidebarSubagentTreeRowProps {
   readonly parentKey: string;
   readonly depth: number;
   readonly childSummary: SidebarSubtreeSummary;
-  /** Idle children the shell left out load on expand, so the count is unknown until then. */
-  readonly hasIdleChildren: boolean;
   readonly isExpanded: boolean;
   readonly isActive: boolean;
   readonly revealRef?:
@@ -162,13 +160,10 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
           ? "bg-success/80"
           : "bg-muted-foreground/45";
 
-  const hasChildren = props.childSummary.totalCount > 0 || props.hasIdleChildren;
-  const countKnown = !props.hasIdleChildren || props.isExpanded;
-  const childrenLabel = countKnown
-    ? gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
-        count: props.childSummary.totalCount,
-      })
-    : gt("subagents");
+  const hasChildren = props.childSummary.totalCount > 0;
+  const childrenLabel = gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
+    count: props.childSummary.totalCount,
+  });
   const cappedDepth = Math.min(props.depth, 5);
   const indentPx = 12 + (cappedDepth - 1) * 14;
   const { revealRef } = props;
@@ -293,7 +288,7 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
           >
             {thread.title}
           </span>
-          {props.childSummary.totalCount > 0 && countKnown && !props.isExpanded ? (
+          {hasChildren && !props.isExpanded ? (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-sidebar-control-surface/70 px-1 py-px text-2xs tabular-nums text-sidebar-muted-foreground">
               {props.childSummary.attentionStatus ? (
                 <span

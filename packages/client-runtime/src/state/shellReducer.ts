@@ -5,6 +5,7 @@ import {
   ThreadPullRequestLink,
   type OrchestrationV2ShellSnapshot,
   type OrchestrationV2ShellStreamItem,
+  type ThreadId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
@@ -179,15 +180,38 @@ export function applyShellStreamEvent(
       };
     }
     case "thread.removed":
-      return {
-        ...snapshot,
-        threads: snapshot.threads.filter((thread) => thread.id !== event.threadId),
-        archivedThreads: snapshot.archivedThreads.filter((thread) => thread.id !== event.threadId),
-        snapshotSequence: event.sequence,
-      };
+      return withoutRemovedIdleSubagents(
+        {
+          ...snapshot,
+          threads: snapshot.threads.filter((thread) => thread.id !== event.threadId),
+          archivedThreads: snapshot.archivedThreads.filter(
+            (thread) => thread.id !== event.threadId,
+          ),
+          snapshotSequence: event.sequence,
+        },
+        new Set([event.threadId]),
+      );
     default:
       return snapshot;
   }
+}
+
+/** Removed threads leave the idle subagents a snapshot named, so their parents count fewer. */
+function withoutRemovedIdleSubagents(
+  snapshot: OrchestrationV2ShellSnapshot,
+  removed: ReadonlySet<ThreadId>,
+): OrchestrationV2ShellSnapshot {
+  const idle = snapshot.idleSubagents;
+  if (idle === undefined || !idle.some((entry) => entry.threadIds.some((id) => removed.has(id)))) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    idleSubagents: idle.flatMap((entry) => {
+      const threadIds = entry.threadIds.filter((id) => !removed.has(id));
+      return threadIds.length === 0 ? [] : [{ ...entry, threadIds }];
+    }),
+  };
 }
 
 /** Index a collection lazily and materialize it only if a delta changes its rows. */
@@ -230,6 +254,7 @@ export function applyShellStreamEvents(
   const threads = batchRows(snapshot.threads);
   const archivedThreads = batchRows(snapshot.archivedThreads);
   let sequence = snapshot.snapshotSequence;
+  const removed = new Set<ThreadId>();
   for (const event of events) {
     if (event.sequence <= sequence) continue;
     switch (event.kind) {
@@ -255,6 +280,7 @@ export function applyShellStreamEvents(
       case "thread.removed":
         threads.remove(event.threadId);
         archivedThreads.remove(event.threadId);
+        removed.add(event.threadId);
         break;
       default:
         continue;
@@ -262,11 +288,14 @@ export function applyShellStreamEvents(
     sequence = event.sequence;
   }
   if (sequence === snapshot.snapshotSequence) return snapshot;
-  return {
-    ...snapshot,
-    snapshotSequence: sequence,
-    projects: projects.finish(),
-    threads: threads.finish(),
-    archivedThreads: archivedThreads.finish(),
-  };
+  return withoutRemovedIdleSubagents(
+    {
+      ...snapshot,
+      snapshotSequence: sequence,
+      projects: projects.finish(),
+      threads: threads.finish(),
+      archivedThreads: archivedThreads.finish(),
+    },
+    removed,
+  );
 }

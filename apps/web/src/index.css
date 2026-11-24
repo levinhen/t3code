@@ -227,6 +227,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
      compositor updates discrete frames instead of every vsync. */
   --animate-status-pulse: status-pulse 2s infinite;
   --animate-status-ping: status-ping 2s infinite;
+  --animate-provider-hop: provider-hop 2.4s infinite;
   /* Stash pulses hold a highlight for 1.2s; the row then eases back over 200ms, the count snaps.
      The row alternates two identical keyframes so each stash restarts it without a remount. */
   --animate-stash-pulse-row: stash-pulse-row 1400ms;
@@ -348,6 +349,21 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     }
     100% {
       opacity: 1;
+    }
+  }
+  @keyframes provider-hop {
+    0%,
+    76% {
+      translate: 0 0;
+      animation-timing-function: steps(3);
+    }
+    84% {
+      translate: 0 -3px;
+      animation-timing-function: steps(3);
+    }
+    92%,
+    100% {
+      translate: 0 0;
     }
   }
   @keyframes step-in {

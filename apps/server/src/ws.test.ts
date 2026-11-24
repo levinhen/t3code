@@ -725,10 +725,12 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
       parent: string | null,
       activityRunStatus: "running" | null,
       settledDaysAgo: number | null = null,
+      providerInstanceId = "codex",
     ) =>
       ({
         id: ThreadId.make(id),
         projectId: "project",
+        providerInstanceId,
         archivedAt: null,
         status: activityRunStatus ?? "completed",
         activityRunStatus,
@@ -746,6 +748,8 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
     const threads = [
       shell("parent", null, null),
       shell("idle", "parent", null),
+      shell("idle-claude", "parent", null, null, "claudeAgent"),
+      shell("idle-repeat", "parent", null),
       shell("live", "parent", "running"),
       ...Array.from({ length: 25 }, (_, index) => shell(`recent-${index}`, null, null, 1)),
       shell("old", null, null, 30),
@@ -801,20 +805,30 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
         ),
       );
 
-    const recent = threads.slice(3, 28).map((thread) => thread.id);
+    const recent = threads.slice(5, 30).map((thread) => thread.id);
     const full = yield* firstSnapshot({});
     assert.deepEqual(
       full?.threads.map((thread) => thread.id),
       threads.map((thread) => thread.id),
     );
     assert.isUndefined(full?.olderSettled);
-    assert.isUndefined(full?.idleSubagentParentIds);
+    assert.isUndefined(full?.idleSubagents);
     const withoutChildren = yield* firstSnapshot({ omitIdleSubagents: true });
     assert.deepEqual(
       withoutChildren?.threads.map((thread) => thread.id),
       ["parent", "live", ...recent, "old", "remote-parent", "remote-child-parent"],
     );
-    assert.deepEqual(withoutChildren?.idleSubagentParentIds, [ThreadId.make("parent")]);
+    // Counted and named by provider, once each, so a collapsed parent needs no family read.
+    assert.deepEqual(withoutChildren?.idleSubagents, [
+      {
+        parentThreadId: ThreadId.make("parent"),
+        threadIds: ["idle", "idle-claude", "idle-repeat"].map((id) => ThreadId.make(id)),
+        providerInstanceIds: [
+          ProviderInstanceId.make("codex"),
+          ProviderInstanceId.make("claudeAgent"),
+        ],
+      },
+    ]);
     // A linked environment's clients nest its task under its parent, so that parent stays: an
     // older settled thread or an idle subagent.
     const withoutOld = yield* firstSnapshot({ omitIdleSubagents: true, omitOlderSettled: true });

@@ -287,6 +287,43 @@ describe("applyShellStreamEvent", () => {
   });
 });
 
+describe("idle subagents", () => {
+  const parentThreadId = ThreadId.make("parent");
+  const idle = (...ids: ReadonlyArray<string>) => ({
+    ...v2ShellSnapshot,
+    idleSubagents: [
+      {
+        parentThreadId,
+        threadIds: ids.map((id) => ThreadId.make(id)),
+        providerInstanceIds: [v2ThreadShell.providerInstanceId],
+      },
+    ],
+  });
+  const removed = (threadId: string, sequence: number): ShellStreamEvent => ({
+    kind: "thread.removed",
+    sequence,
+    location: "active",
+    threadId: ThreadId.make(threadId),
+  });
+
+  it("drop a removed child, and its parent once none is left", () => {
+    const one = applyShellStreamEvent(idle("a", "b"), removed("a", 1));
+    expect(one.idleSubagents?.[0]?.threadIds).toEqual([ThreadId.make("b")]);
+    const none = applyShellStreamEvents(idle("a", "b"), [removed("a", 1), removed("b", 2)]);
+    expect(none.idleSubagents).toEqual([]);
+  });
+
+  it("stay the same array when another thread is removed", () => {
+    const snapshot = idle("a");
+    expect(applyShellStreamEvent(snapshot, removed("other", 1)).idleSubagents).toBe(
+      snapshot.idleSubagents,
+    );
+    expect(
+      applyShellStreamEvents(snapshot, [removed("other", 1), removed("else", 2)]).idleSubagents,
+    ).toBe(snapshot.idleSubagents);
+  });
+});
+
 describe("reuseUnchangedThreadShells", () => {
   const link: ThreadPullRequestLink = {
     host: "github.com",

@@ -123,6 +123,7 @@ import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelName } from "../chat/providerIconUtils";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
+import type { SidebarSubtreeSummary } from "./subagentTree";
 import { useThreadRunningTerminalIds } from "../../state/terminalSessions";
 import { InlineButton } from "../ui/button";
 import { Kbd } from "../ui/kbd";
@@ -206,36 +207,58 @@ function terminalProcessLabel(count: number, resolve: MessageResolver): string {
   );
 }
 
+/**
+ * The thread's own providers (handed-off ones greyed), then those of its subagents and delegated
+ * tasks. A provider with a working thread hops.
+ */
 function SidebarProviderStack(props: {
   thread: SidebarThreadSummary;
+  isWorking: boolean;
+  subtree: Pick<SidebarSubtreeSummary, "providerInstanceIds" | "runningProviderInstanceIds"> | null;
   providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
 }) {
   const stack = resolveThreadProviderStack(props.thread);
   const currentInstanceId = stack[stack.length - 1]!;
-  const currentEntry = props.providerEntryByInstanceId.get(currentInstanceId) ?? null;
-  if (currentEntry === null) return null;
-  const showInstanceBadge = shouldShowInstanceBadge(
-    currentEntry,
-    props.providerEntryByInstanceId.values(),
-  );
-  const current = (
-    <ProviderInstanceIcon
-      driverKind={currentEntry.driverKind}
-      displayName={currentEntry.displayName}
-      accentColor={currentEntry.accentColor}
-      acpRegistryAgentId={currentEntry.acpRegistryAgentId}
-      acpRegistryIconUrl={currentEntry.acpRegistryIconUrl}
-      showBadge={showInstanceBadge}
-      size="compact"
-      iconClassName="opacity-60"
-    />
-  );
-  if (stack.length === 1) {
-    return <span className="inline-flex shrink-0 items-center">{current}</span>;
-  }
+  if (!props.providerEntryByInstanceId.has(currentInstanceId)) return null;
+  const subtreeProviders = props.subtree?.providerInstanceIds ?? [];
+  const running = new Set<string>(props.subtree?.runningProviderInstanceIds);
+  if (props.isWorking) running.add(currentInstanceId);
+  const handedOff = stack
+    .slice(0, -1)
+    .filter((instanceId) => !subtreeProviders.includes(instanceId));
+  const participating = [
+    currentInstanceId,
+    ...subtreeProviders.filter((instanceId) => instanceId !== currentInstanceId),
+  ];
+  const icon = (instanceId: string) => {
+    const entry = props.providerEntryByInstanceId.get(instanceId);
+    if (entry === undefined) return null;
+    const isRunning = running.has(instanceId);
+    return (
+      <span
+        key={instanceId}
+        className={cn(
+          "inline-flex items-center",
+          instanceId === currentInstanceId && "relative z-10",
+          isRunning && "motion-safe:animate-provider-hop",
+        )}
+      >
+        <ProviderInstanceIcon
+          driverKind={entry.driverKind}
+          displayName={entry.displayName}
+          accentColor={entry.accentColor}
+          acpRegistryAgentId={entry.acpRegistryAgentId}
+          acpRegistryIconUrl={entry.acpRegistryIconUrl}
+          showBadge={shouldShowInstanceBadge(entry, props.providerEntryByInstanceId.values())}
+          size="compact"
+          iconClassName={isRunning ? "opacity-100" : "opacity-60"}
+        />
+      </span>
+    );
+  };
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5">
-      {stack.slice(0, -1).map((instanceId) => {
+      {handedOff.map((instanceId) => {
         const entry = props.providerEntryByInstanceId.get(instanceId);
         if (entry === undefined) return null;
         return (
@@ -249,7 +272,7 @@ function SidebarProviderStack(props: {
           />
         );
       })}
-      <span className="relative z-10 inline-flex items-center">{current}</span>
+      {participating.map(icon)}
     </span>
   );
 }
@@ -639,15 +662,10 @@ type SidebarThreadRowProps = {
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
   subagentTree?:
-    | {
-        readonly totalCount: number;
-        readonly runningCount: number;
-        readonly attentionStatus: "attention" | "failed" | "working" | null;
-        /** Idle children the shell left out load on expand, so the count is unknown until then. */
-        readonly hasIdleChildren: boolean;
+    | (SidebarSubtreeSummary & {
         readonly expanded: boolean;
         readonly onToggle: (threadKey: string, currentlyExpanded: boolean) => void;
-      }
+      })
     | undefined;
 };
 
@@ -1308,6 +1326,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       >
         <SidebarProviderStack
           thread={thread}
+          isWorking={status === "preparing" || status === "working"}
+          subtree={props.subagentTree ?? null}
           providerEntryByInstanceId={props.providerEntryByInstanceId}
         />
       </span>
@@ -1317,22 +1337,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     <span aria-hidden className="inline-flex shrink-0 items-center gap-1">
       <SidebarProviderStack
         thread={thread}
+        isWorking={status === "preparing" || status === "working"}
+        subtree={props.subagentTree ?? null}
         providerEntryByInstanceId={props.providerEntryByInstanceId}
       />
     </span>
   ) : null;
 
-  const subagentCountKnown =
-    props.subagentTree !== undefined &&
-    (!props.subagentTree.hasIdleChildren || props.subagentTree.expanded);
   const subagentTreeLabel =
     props.subagentTree === undefined
       ? ""
-      : subagentCountKnown
-        ? gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
-            count: props.subagentTree.totalCount,
-          })
-        : gt("subagents");
+      : gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
+          count: props.subagentTree.totalCount,
+        });
   const subagentTreeToggle =
     props.subagentTree !== undefined ? (
       <button
@@ -1377,7 +1394,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             )}
           />
         ) : null}
-        {subagentCountKnown ? <span>{props.subagentTree.totalCount}</span> : null}
+        <span>{props.subagentTree.totalCount}</span>
       </button>
     ) : null;
 

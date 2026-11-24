@@ -1,5 +1,6 @@
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import type { IdleSubagentChildren } from "@t3tools/client-runtime/state/threads";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { makeThreadFixture, type ThreadFixtureOverrides } from "../../test-fixtures";
@@ -13,6 +14,17 @@ const localEnv = EnvironmentId.make("local");
 const remoteEnv = EnvironmentId.make("remote");
 const projectId = ProjectId.make("project-1");
 const NONE: ReadonlySet<string> = new Set();
+const NO_IDLE: ReadonlyMap<string, IdleSubagentChildren> = new Map();
+const codex = ProviderInstanceId.make("codex");
+const claude = ProviderInstanceId.make("claudeAgent");
+const running = (providerInstanceId: ProviderInstanceId) => ({
+  status: "running" as const,
+  activeRunId: null,
+  providerInstanceId,
+  providerName: providerInstanceId,
+  lastError: null,
+  updatedAt: "2026-03-09T10:00:00.000Z",
+});
 
 function makeThread(overrides: ThreadFixtureOverrides = {}) {
   return makeThreadFixture({
@@ -100,6 +112,8 @@ describe("sidebar subagent tree", () => {
       totalCount: 4,
       runningCount: 0,
       attentionStatus: null,
+      providerInstanceIds: [codex],
+      runningProviderInstanceIds: [],
     });
   });
 
@@ -128,14 +142,14 @@ describe("sidebar subagent tree", () => {
     ];
     const idleByParent = buildSidebarChildThreadsByParent(idleThreads, new Set());
 
-    expect(collectVisibleSidebarDescendants(rootKey, idleByParent, NONE, {}, null).rows).toEqual(
+    expect(collectVisibleSidebarDescendants(rootKey, idleByParent, NO_IDLE, {}, null).rows).toEqual(
       [],
     );
 
     const manualExpanded = collectVisibleSidebarDescendants(
       rootKey,
       idleByParent,
-      NONE,
+      NO_IDLE,
       { [rootKey]: true },
       null,
     );
@@ -145,7 +159,7 @@ describe("sidebar subagent tree", () => {
     const activeGrandchild = collectVisibleSidebarDescendants(
       rootKey,
       idleByParent,
-      NONE,
+      NO_IDLE,
       {},
       grandchildKey,
     );
@@ -157,7 +171,7 @@ describe("sidebar subagent tree", () => {
     const explicitlyCollapsed = collectVisibleSidebarDescendants(
       rootKey,
       idleByParent,
-      NONE,
+      NO_IDLE,
       { [rootKey]: false },
       grandchildKey,
     );
@@ -169,72 +183,119 @@ describe("sidebar subagent tree", () => {
       makeThread({
         id: childId,
         lineage: { rootThreadId: rootId, parentThreadId: rootId, relationshipToParent: "subagent" },
-        runtime: {
-          status: "running",
-          activeRunId: null,
-          providerInstanceId: "codex" as never,
-          providerName: "Codex",
-          lastError: null,
-          updatedAt: "2026-03-09T10:00:00.000Z",
-        },
+        runtime: running(codex),
       }),
     ];
     const runningByParent = buildSidebarChildThreadsByParent(runningThreads, new Set());
-    const autoRunning = collectVisibleSidebarDescendants(rootKey, runningByParent, NONE, {}, null);
+    const autoRunning = collectVisibleSidebarDescendants(
+      rootKey,
+      runningByParent,
+      NO_IDLE,
+      {},
+      null,
+    );
     expect(autoRunning.isExpanded).toBe(true);
     expect(autoRunning.summary).toEqual({
       totalCount: 1,
       runningCount: 1,
       attentionStatus: "working",
+      providerInstanceIds: [codex],
+      runningProviderInstanceIds: [codex],
     });
     expect(autoRunning.rows.map((row) => row.threadKey)).toEqual([childKey]);
   });
 
-  it("lets a parent whose idle children the shell left out expand and asks for its family", () => {
+  it("counts and names the idle children the shell left out before and after their rows load", () => {
     const rootId = ThreadId.make("root");
     const childId = ThreadId.make("child");
+    const otherId = ThreadId.make("other");
     const rootKey = scopedThreadKey(scopeThreadRef(localEnv, rootId));
     const childKey = scopedThreadKey(scopeThreadRef(localEnv, childId));
-    const idleParents = new Set([rootKey, childKey]);
+    const otherKey = scopedThreadKey(scopeThreadRef(localEnv, otherId));
+    const idle = new Map<string, IdleSubagentChildren>([
+      [rootKey, { threadKeys: [childKey, otherKey], providerInstanceIds: [claude] }],
+    ]);
     const shellOnly = buildSidebarChildThreadsByParent([makeThread({ id: rootId })], NONE);
 
-    const collapsed = collectVisibleSidebarDescendants(rootKey, shellOnly, idleParents, {}, null);
-    expect(collapsed).toMatchObject({ hasIdleChildren: true, isExpanded: false, familyKeys: [] });
+    const collapsed = collectVisibleSidebarDescendants(rootKey, shellOnly, idle, {}, null);
+    expect(collapsed).toMatchObject({ isExpanded: false, familyKeys: [] });
+    expect(collapsed.summary).toMatchObject({ totalCount: 2, providerInstanceIds: [claude] });
 
     const loading = collectVisibleSidebarDescendants(
       rootKey,
       shellOnly,
-      idleParents,
+      idle,
       { [rootKey]: true },
       null,
     );
     expect(loading).toMatchObject({ isExpanded: true, rows: [], familyKeys: [rootKey] });
 
-    const familyRows = buildSidebarChildThreadsByParent(
-      [
-        makeThread({ id: rootId }),
-        makeThread({
-          id: childId,
-          lineage: {
-            rootThreadId: rootId,
-            parentThreadId: rootId,
-            relationshipToParent: "subagent",
-          },
-        }),
-      ],
+    const subagent = (id: ThreadId) =>
+      makeThread({
+        id,
+        providerInstanceId: claude,
+        lineage: { rootThreadId: rootId, parentThreadId: rootId, relationshipToParent: "subagent" },
+      });
+    const oneLoaded = buildSidebarChildThreadsByParent(
+      [makeThread({ id: rootId }), subagent(childId)],
       NONE,
     );
-    const nested = collectVisibleSidebarDescendants(
+    const partly = collectVisibleSidebarDescendants(
       rootKey,
-      familyRows,
-      idleParents,
-      { [rootKey]: true, [childKey]: true },
+      oneLoaded,
+      idle,
+      { [rootKey]: true },
       null,
     );
-    expect(nested.rows.map((row) => [row.threadKey, row.hasIdleChildren, row.isExpanded])).toEqual([
-      [childKey, true, true],
+    // A loaded child is not counted again, and the parent keeps its family mounted.
+    expect(partly.summary.totalCount).toBe(2);
+    expect(partly.rows.map((row) => row.threadKey)).toEqual([childKey]);
+    expect(partly.familyKeys).toEqual([rootKey]);
+  });
+
+  it("names every provider in the subtree and which of them are working", () => {
+    const rootId = ThreadId.make("root");
+    const rootKey = scopedThreadKey(scopeThreadRef(localEnv, rootId));
+    const childKey = (id: string) => scopedThreadKey(scopeThreadRef(localEnv, ThreadId.make(id)));
+    const threads = [
+      makeThread({ id: rootId }),
+      makeThread({
+        id: ThreadId.make("claude-child"),
+        providerInstanceId: claude,
+        runtime: running(claude),
+        lineage: { rootThreadId: rootId, parentThreadId: rootId, relationshipToParent: "subagent" },
+      }),
+      makeThread({
+        id: ThreadId.make("codex-grandchild"),
+        lineage: {
+          rootThreadId: rootId,
+          parentThreadId: ThreadId.make("claude-child"),
+          relationshipToParent: "subagent",
+        },
+      }),
+    ];
+    const idle = new Map<string, IdleSubagentChildren>([
+      [
+        childKey("codex-grandchild"),
+        {
+          threadKeys: [childKey("idle-gemini")],
+          providerInstanceIds: [ProviderInstanceId.make("gemini")],
+        },
+      ],
     ]);
-    expect(nested.familyKeys).toEqual([rootKey, childKey]);
+    const summary = summarizeSidebarSubtree(
+      rootKey,
+      buildSidebarChildThreadsByParent(threads, NONE),
+      idle,
+    );
+    expect(summary).toMatchObject({
+      totalCount: 3,
+      runningCount: 1,
+      runningProviderInstanceIds: [claude],
+    });
+    expect([...summary.providerInstanceIds].toSorted()).toEqual(
+      [claude, codex, ProviderInstanceId.make("gemini")].toSorted(),
+    );
   });
 
   it("handles parent cycles safely without looping", () => {
@@ -252,7 +313,13 @@ describe("sidebar subagent tree", () => {
       }),
     ];
     const byParent = buildSidebarChildThreadsByParent(threads, new Set());
-    const result = collectVisibleSidebarDescendants(aKey, byParent, NONE, { [aKey]: true }, null);
+    const result = collectVisibleSidebarDescendants(
+      aKey,
+      byParent,
+      NO_IDLE,
+      { [aKey]: true },
+      null,
+    );
     expect(result.summary.totalCount).toBe(1);
     expect(result.rows.map((row) => row.thread.id)).toEqual([bId]);
   });

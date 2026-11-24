@@ -4,6 +4,7 @@ import type {
   EnvironmentId,
   OrchestrationV2ShellSnapshot,
   ProjectId,
+  ProviderInstanceId,
   ScopedProjectRef,
   ScopedThreadRef,
   ThreadId,
@@ -262,6 +263,12 @@ function sameApartFromStreaming(
       after,
     )
   );
+}
+
+/** A parent's subagent children the shell left out, which its thread family reads. */
+export interface IdleSubagentChildren {
+  readonly threadKeys: ReadonlyArray<string>;
+  readonly providerInstanceIds: ReadonlyArray<ProviderInstanceId>;
 }
 
 export function createEnvironmentThreadShellAtoms(input: {
@@ -770,23 +777,40 @@ export function createEnvironmentThreadShellAtoms(input: {
     return next;
   }).pipe(Atom.withLabel("environment-delegated-under-parent"));
 
-  let previousIdleSubagentParents: ReadonlySet<string> = new Set();
-  const idleSubagentParentsAtom = Atom.make((get) => {
-    const next = new Set<string>();
-    for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
-      for (const threadId of get(input.snapshotAtom(environmentId))?.idleSubagentParentIds ?? []) {
-        next.add(threadKey({ environmentId, threadId }));
+  // Shell deltas keep a snapshot's idle list unless a child is removed, so most updates reuse it.
+  let previousIdleSources: ReadonlyArray<
+    readonly [EnvironmentId, OrchestrationV2ShellSnapshot["idleSubagents"]]
+  > = [];
+  let previousIdleSubagents: ReadonlyMap<string, IdleSubagentChildren> = new Map();
+  const idleSubagentsAtom = Atom.make((get) => {
+    const sources = Array.from(
+      enabledEnvironmentIds(get(input.catalogValueAtom)),
+      (environmentId) =>
+        [environmentId, get(input.snapshotAtom(environmentId))?.idleSubagents] as const,
+    );
+    if (
+      sources.length === previousIdleSources.length &&
+      sources.every(
+        ([environmentId, idle], index) =>
+          previousIdleSources[index]?.[0] === environmentId &&
+          previousIdleSources[index]?.[1] === idle,
+      )
+    ) {
+      return previousIdleSubagents;
+    }
+    const next = new Map<string, IdleSubagentChildren>();
+    for (const [environmentId, idle] of sources) {
+      for (const entry of idle ?? []) {
+        next.set(threadKey({ environmentId, threadId: entry.parentThreadId }), {
+          threadKeys: entry.threadIds.map((threadId) => threadKey({ environmentId, threadId })),
+          providerInstanceIds: entry.providerInstanceIds,
+        });
       }
     }
-    if (
-      next.size === previousIdleSubagentParents.size &&
-      [...next].every((key) => previousIdleSubagentParents.has(key))
-    ) {
-      return previousIdleSubagentParents;
-    }
-    previousIdleSubagentParents = next;
+    previousIdleSources = sources;
+    previousIdleSubagents = next;
     return next;
-  }).pipe(Atom.withLabel("environment-idle-subagent-parents"));
+  }).pipe(Atom.withLabel("environment-idle-subagents"));
 
   let previousNavigationShells: ReadonlyArray<EnvironmentThreadShell> = [];
   const navigationThreadShellsAtom = Atom.make((get) => {
@@ -824,8 +848,8 @@ export function createEnvironmentThreadShellAtoms(input: {
     quietThreadShellsAtom,
     navigationThreadShellsAtom,
     delegatedUnderParentAtom,
-    /** Threads with idle subagent children the shell left out; read them with a thread family. */
-    idleSubagentParentsAtom,
+    /** Parents' subagent children the shell left out, by parent thread key. */
+    idleSubagentsAtom,
     pendingSubagentRequestsAtom,
     threadShellsForProjectRefsAtom: (refs: ReadonlyArray<ScopedProjectRef>) =>
       threadShellsForProjectRefsAtomFamily(projectRefCollectionKey(refs)),

@@ -151,7 +151,7 @@ import {
   readThreadShell,
   useAllEnvironmentProjectSnapshotsReady,
   useDelegatedUnderParent,
-  useIdleSubagentParents,
+  useIdleSubagents,
   useProjects,
   useServerConfigs,
   useQuietThreadShells,
@@ -939,7 +939,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     projectScopeItems: lookupProjectScopeItems,
   } = useSidebarLookups();
   const delegatedUnderParent = useDelegatedUnderParent();
-  const idleSubagentParents = useIdleSubagentParents();
+  const idleSubagents = useIdleSubagents();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -3539,7 +3539,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         const subtree = collectVisibleSidebarDescendants(
                           threadKey,
                           childThreadsByParent,
-                          idleSubagentParents,
+                          idleSubagents,
                           threadSubtreeExpandedById,
                           routeThreadKey,
                         );
@@ -3649,10 +3649,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             onAcknowledgeWoke={acknowledgeWoke}
                             onFileDropThreads={handleThreadFileDrop}
                             subagentTree={
-                              subtree.summary.totalCount > 0 || subtree.hasIdleChildren
+                              subtree.summary.totalCount > 0
                                 ? {
                                     ...subtree.summary,
-                                    hasIdleChildren: subtree.hasIdleChildren,
                                     expanded: subtree.isExpanded,
                                     onToggle: toggleThreadSubtree,
                                   }
@@ -3668,7 +3667,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               parentKey={descendant.parentKey}
                               depth={descendant.depth}
                               childSummary={descendant.childSummary}
-                              hasIdleChildren={descendant.hasIdleChildren}
                               isExpanded={descendant.isExpanded}
                               isActive={routeThreadKey === descendant.threadKey}
                               providerEntryByInstanceId={
