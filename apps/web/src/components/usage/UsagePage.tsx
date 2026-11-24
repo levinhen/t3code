@@ -23,8 +23,11 @@ import {
 } from "@t3tools/client-runtime/state/usage-progress";
 
 import {
+  cacheHitRate,
+  costPerTurn,
   isCompatibleUsageContractVersion,
   isModelCostUnknown,
+  tokensPerTurn,
   type DailyTotals,
   type HourlyTotals,
   type MergedUsage,
@@ -919,7 +922,7 @@ function UsageOverview({
         {breakdown === "model" ? (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border text-right text-xs text-muted-foreground">
+              <tr className="border-b border-border text-right text-xs whitespace-nowrap text-muted-foreground">
                 <th className="py-2 pr-3 pl-2 text-left font-normal">#</th>
                 <th className="w-full py-2 text-left font-normal">
                   <T>Model</T>
@@ -930,6 +933,12 @@ function UsageOverview({
                 <th className="hidden py-2 pl-6 font-normal sm:table-cell">
                   <T context="column heading, percentage share">Share</T>
                 </th>
+                <th className="hidden py-2 pl-6 font-normal md:table-cell">
+                  <T context="column heading, share of input read from cache">Cache hit</T>
+                </th>
+                <th className="hidden py-2 pl-6 font-normal md:table-cell">
+                  <T context="column heading, average cost or tokens of one turn">Per turn</T>
+                </th>
                 <th className="py-2 pr-2 pl-6 font-normal">
                   <T>Tokens</T>
                 </th>
@@ -938,7 +947,7 @@ function UsageOverview({
             <tbody>
               {breakdownModels.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={7} className="py-6 text-center text-muted-foreground">
                     <T>No activity in this window.</T>
                   </td>
                 </tr>
@@ -948,6 +957,8 @@ function UsageOverview({
                   const value = metric === "tokens" ? model.totalTokens : model.costUsd;
                   const hasBar = value > 0 && breakdownPeak > 0;
                   const share = modelShare(model, metric === "tokens" ? "tokens" : "cost");
+                  const hitRate = cacheHitRate(model);
+                  const perTurn = metric === "tokens" ? tokensPerTurn(model) : costPerTurn(model);
                   const rowFigures = figureClass(loadingProviders.has(model.provider));
                   return (
                     <tr
@@ -990,6 +1001,16 @@ function UsageOverview({
                       </td>
                       <td className={cn("hidden py-2.5 pl-6 sm:table-cell", rowFigures)}>
                         {share === null ? "" : formatPercent(share)}
+                      </td>
+                      <td className={cn("hidden py-2.5 pl-6 md:table-cell", rowFigures)}>
+                        {hitRate === null ? "" : formatPercent(hitRate)}
+                      </td>
+                      <td className={cn("hidden py-2.5 pl-6 md:table-cell", rowFigures)}>
+                        {perTurn === null
+                          ? ""
+                          : metric === "tokens"
+                            ? formatTokens(perTurn)
+                            : formatUsd(perTurn, locale)}
                       </td>
                       <td className={cn("py-2.5 pr-2 pl-6", rowFigures)}>
                         {formatTokens(model.totalTokens)}

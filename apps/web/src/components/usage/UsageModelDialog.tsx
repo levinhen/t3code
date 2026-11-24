@@ -1,6 +1,13 @@
 import { T, useGT, useLocale, Var } from "gt-react";
-import { formatPercent, formatTokens, formatUsd } from "@t3tools/shared/usageFormat";
-import { isModelCostUnknown, type ModelTotals } from "@t3tools/shared/usageMerge";
+import { formatCount, formatPercent, formatTokens, formatUsd } from "@t3tools/shared/usageFormat";
+import {
+  cacheHitRate,
+  costPerMillionTokens,
+  costPerTurn,
+  isModelCostUnknown,
+  tokensPerTurn,
+  type ModelTotals,
+} from "@t3tools/shared/usageMerge";
 
 import { mergeAnsweredUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -16,13 +23,7 @@ import {
 } from "../ui/dialog";
 import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
 import { UsageShareBar } from "./UsageShareBar";
-import {
-  cacheHitRate,
-  costPerMillionTokens,
-  costTypeSegments,
-  speedCostSegments,
-  tokenTypeSegments,
-} from "./usageBreakdown";
+import { costTypeSegments, speedCostSegments, tokenTypeSegments } from "./usageBreakdown";
 import { PROVIDER_PRESENTATION } from "./usageProviders";
 
 export interface UsageChartWindow {
@@ -60,6 +61,8 @@ export function UsageModelDialog({
   const costUnknown = isModelCostUnknown(model);
   const hitRate = cacheHitRate(model);
   const perMillion = costPerMillionTokens(model);
+  const turnTokens = tokensPerTurn(model);
+  const turnCost = costPerTurn(model);
   const stats = [
     { label: gt("Cost"), value: costUnknown ? gt("Unpriced") : formatUsd(model.costUsd, locale) },
     { label: gt("Tokens"), value: formatTokens(model.totalTokens) },
@@ -67,6 +70,11 @@ export function UsageModelDialog({
       ? null
       : { label: gt("Per 1M tokens"), value: formatUsd(perMillion, locale) },
     hitRate === null ? null : { label: gt("Cache hit"), value: formatPercent(hitRate) },
+    model.turns === 0
+      ? null
+      : { label: gt("Turns in T3"), value: formatCount(model.turns, locale) },
+    turnTokens === null ? null : { label: gt("Tokens per turn"), value: formatTokens(turnTokens) },
+    turnCost === null ? null : { label: gt("Cost per turn"), value: formatUsd(turnCost, locale) },
   ].filter((stat) => stat !== null);
 
   return (

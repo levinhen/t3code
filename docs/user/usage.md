@@ -13,7 +13,14 @@ from your connected environments. It shows token use, cache savings, model break
 cost, split by token type and by speed. These estimates are not your subscription bill.
 **Premium** is what Fast and Ultrafast requests cost above standard rates. Cost that cannot be
 split, such as a provider-reported cost for a model without public rates, shows as **Other**.
-Select a model under **Breakdown** to see its trend, cache hit rate, and cost per million tokens.
+Each model's cache hit rate and average cost or tokens per turn appear under **Breakdown** on wider
+web and desktop windows, and under **By model** on mobile. Select a model under **Breakdown** to
+see its trend, cost per million tokens, and how many turns it ran in T3.
+
+Per-turn figures count only turns run in T3 whose provider reports the turn's usage and model,
+currently Claude Code, Codex, and OpenCode. They cover the main agent's model calls, not native
+subagents or compaction. Cost per turn applies the model's cost per million tokens to its average
+turn.
 
 Totals depend on the history available on each server. Grok turns without a saved completed-turn
 record are missing from the totals.

@@ -72,6 +72,15 @@ export const UsageBucket = Schema.Struct({
 });
 export type UsageBucket = typeof UsageBucket.Type;
 
+/** Turns T3 ran whose provider reported the main agent's usage, after model filters and aliases. */
+export const UsageTurnTotals = Schema.Struct({
+  provider: UsageProviderKind,
+  model: TrimmedNonEmptyString,
+  turns: NonNegativeInt,
+  totals: UsageTokenTotals,
+});
+export type UsageTurnTotals = typeof UsageTurnTotals.Type;
+
 export const UsageSourceFingerprint = Schema.Struct({
   hostId: TrimmedNonEmptyString,
   provider: UsageProviderKind,
@@ -155,6 +164,8 @@ export const UsageSummary = Schema.Struct({
   sinceDay: UsageDay,
   untilDay: UsageDay,
   buckets: ForwardCompatibleArray(UsageBucket),
+  /** Absent from servers that predate per-turn totals. */
+  turns: Schema.optional(ForwardCompatibleArray(UsageTurnTotals)),
   sources: ForwardCompatibleArray(UsageSource),
   pricing: UsagePricing,
   scanDurationMs: NonNegativeInt,

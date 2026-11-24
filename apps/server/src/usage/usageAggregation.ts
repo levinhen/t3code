@@ -7,6 +7,7 @@ import type {
   UsageModelSelector,
   UsageResolution,
   UsageTokenTotals,
+  UsageTurnTotals,
 } from "@t3tools/contracts";
 
 import { EMPTY_TOTALS, type UsageRecord } from "@t3tools/provider-core/server/usage";
@@ -121,13 +122,49 @@ export function resolveModelAliases(
 }
 
 /** Matches original IDs, so an alias cannot pull excluded usage into a kept model. */
-function keepsUsageRecord(filter: UsageModelFilter | undefined, record: UsageRecord): boolean {
+function keepsUsageRecord(
+  filter: UsageModelFilter | undefined,
+  record: Pick<UsageRecord, "provider" | "model">,
+): boolean {
   if (filter === undefined) return true;
   const model = record.model.trim();
   const matches = (selector: UsageModelSelector) =>
     selector.model === model &&
     (selector.provider === undefined || selector.provider === record.provider);
   return (filter.include?.some(matches) ?? true) && !(filter.exclude?.some(matches) ?? false);
+}
+
+/** Sums turns per model under the filter and aliases transcript usage gets, so both name models alike. */
+export function aggregateTurnUsage(
+  turns: Iterable<{
+    readonly provider: UsageRecord["provider"];
+    readonly model: string;
+    readonly totals: UsageTokenTotals;
+  }>,
+  options: Pick<AggregateOptions, "modelAliases" | "modelFilter">,
+): UsageTurnTotals[] {
+  const byModel = new Map<string, UsageTurnTotals>();
+  for (const turn of turns) {
+    if (!keepsUsageRecord(options.modelFilter, turn)) continue;
+    const model = options.modelAliases?.get(turn.model) ?? turn.model;
+    const key = `${turn.provider}\u0000${model}`;
+    const held = byModel.get(key);
+    byModel.set(key, {
+      provider: turn.provider,
+      model,
+      turns: (held?.turns ?? 0) + 1,
+      totals: {
+        uncachedInputTokens:
+          (held?.totals.uncachedInputTokens ?? 0) + turn.totals.uncachedInputTokens,
+        cachedInputTokens: (held?.totals.cachedInputTokens ?? 0) + turn.totals.cachedInputTokens,
+        cacheCreationTokens:
+          (held?.totals.cacheCreationTokens ?? 0) + turn.totals.cacheCreationTokens,
+        outputTokens: (held?.totals.outputTokens ?? 0) + turn.totals.outputTokens,
+        reasoningTokens: (held?.totals.reasoningTokens ?? 0) + turn.totals.reasoningTokens,
+      },
+    });
+  }
+  return [...byModel.values()];
 }
 
 const selectorKey = (selector: UsageModelSelector) =>

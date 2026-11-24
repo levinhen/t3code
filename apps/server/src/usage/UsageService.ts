@@ -39,7 +39,9 @@ import type {
   TranscriptUsageFormat,
   UsageRecord,
 } from "@t3tools/provider-core/server/usage";
+import * as TurnUsageHistory from "./TurnUsageHistory.ts";
 import {
+  aggregateTurnUsage,
   canonicalModelFilter,
   resolveModelAliases,
   usageTimestampFilter,
@@ -97,6 +99,12 @@ const scanReaders = BUILT_IN_USAGE_DRIVERS.flatMap((driver) =>
 const providerRateModels = new Map(
   BUILT_IN_USAGE_DRIVERS.flatMap(({ usage }) =>
     usage?.rateModel === undefined ? [] : [[usage.provider, usage.rateModel] as const],
+  ),
+);
+
+const usageProviderByDriver: ReadonlyMap<string, UsageProviderKind> = new Map(
+  BUILT_IN_USAGE_DRIVERS.flatMap(({ driverKind, usage }) =>
+    usage === undefined ? [] : [[driverKind, usage.provider] as const],
   ),
 );
 
@@ -195,6 +203,7 @@ export const make = Effect.gen(function* () {
       return id;
     });
   const hostname = yield* HostProcess.Hostname;
+  const turnUsageHistory = yield* TurnUsageHistory.TurnUsageHistory;
   const readerContext = yield* Effect.context<BuiltInUsageReadersEnv>();
 
   const fileCache: ScanCache = new Map();
@@ -917,9 +926,17 @@ export const make = Effect.gen(function* () {
       );
       return { scannedDirs: scanned, fromMemory };
     });
-    const [{ scannedDirs, fromMemory }] = yield* Effect.all(
-      [collect, provisional ? Effect.void : ensureRates(false)],
-      { concurrency: 2 },
+    const readTurns = turnUsageHistory.read({ sinceMs: windowStartMs, untilMs: windowEndMs }).pipe(
+      Effect.catchTags({
+        TurnUsageHistoryReadError: (error) =>
+          Effect.logWarning("failed to read the usage of T3 turns", { cause: error.cause }).pipe(
+            Effect.as([]),
+          ),
+      }),
+    );
+    const [{ scannedDirs, fromMemory }, , turnUsage] = yield* Effect.all(
+      [collect, provisional ? Effect.void : ensureRates(false), readTurns],
+      { concurrency: 3 },
     );
 
     const priceOverrides = createOverrideRateTable(settings.usagePriceOverrides);
@@ -1185,6 +1202,18 @@ export const make = Effect.gen(function* () {
       );
 
     const aggregated = aggregator.finish();
+    const turns = aggregateTurnUsage(
+      turnUsage.flatMap((turn) => {
+        const provider = usageProviderByDriver.get(turn.driver);
+        return provider !== undefined && inWindow(turn.completedAtMs)
+          ? [{ ...turn, provider }]
+          : [];
+      }),
+      {
+        modelAliases,
+        ...(input.modelFilter === undefined ? {} : { modelFilter: input.modelFilter }),
+      },
+    );
     const readAt = yield* DateTime.now;
     const finishedAtMs = yield* Clock.currentTimeMillis;
 
@@ -1195,6 +1224,7 @@ export const make = Effect.gen(function* () {
       sinceDay: input.sinceDay,
       untilDay: input.untilDay,
       buckets: aggregated.buckets,
+      turns,
       sources,
       pricing: summaryPricing,
       scanDurationMs: Math.max(0, finishedAtMs - startedAtMs),

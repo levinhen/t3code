@@ -36,11 +36,39 @@ export interface ModelTotals {
   readonly unpricedTokens: number;
   readonly costShare: number;
   readonly tokenShare: number;
+  /** Turns T3 ran with reported usage, and their tokens; 0 from servers that predate them. */
+  readonly turns: number;
+  readonly turnTokens: number;
 }
 
 /** When every record lacks rates, costUsd is unknown and must not be displayed as a dollar figure. */
 export function isModelCostUnknown(model: ModelTotals): boolean {
   return model.records > 0 && model.unpricedRecords >= model.records;
+}
+
+/** Returns null without input; cache writes count as misses because input was fully processed. */
+export function cacheHitRate({ tokens }: ModelTotals): number | null {
+  const input = tokens.uncachedInputTokens + tokens.cachedInputTokens + tokens.cacheCreationTokens;
+  return input === 0 ? null : tokens.cachedInputTokens / input;
+}
+
+/** Effective USD per million priced tokens, or `null` when none were priced. */
+export function costPerMillionTokens(model: ModelTotals): number | null {
+  const pricedTokens = model.totalTokens - model.unpricedTokens;
+  return pricedTokens <= 0 || isModelCostUnknown(model)
+    ? null
+    : (model.costUsd / pricedTokens) * 1_000_000;
+}
+
+export function tokensPerTurn(model: ModelTotals): number | null {
+  return model.turns === 0 ? null : model.turnTokens / model.turns;
+}
+
+/** Turns carry tokens but no price, so this applies the model's effective rate to its average turn. */
+export function costPerTurn(model: ModelTotals): number | null {
+  const tokens = tokensPerTurn(model);
+  const perMillion = costPerMillionTokens(model);
+  return tokens === null || perMillion === null ? null : (tokens * perMillion) / 1_000_000;
 }
 
 export interface DailyTotals {
@@ -287,13 +315,13 @@ function ownedContribution(
   };
 }
 
-function bucketTokens(bucket: UsageBucket): number {
+function sumTokens(totals: UsageTokenTotals): number {
   // reasoningTokens is a subset of outputTokens and must not be added again.
   return (
-    bucket.totals.uncachedInputTokens +
-    bucket.totals.cachedInputTokens +
-    bucket.totals.cacheCreationTokens +
-    bucket.totals.outputTokens
+    totals.uncachedInputTokens +
+    totals.cachedInputTokens +
+    totals.cacheCreationTokens +
+    totals.outputTokens
   );
 }
 
@@ -410,8 +438,18 @@ export function mergeUsage(
     }
   >();
   const contributingEnvironments: EnvironmentId[] = [];
+  // Each server counts only the turns it ran, so turns never repeat across environments.
+  const turnAccumulator = new Map<string, { turns: number; tokens: number }>();
 
   for (const environment of current) {
+    for (const turn of environment.summary.turns ?? []) {
+      const key = `${turn.provider} ${turn.model}`;
+      const held = turnAccumulator.get(key) ?? { turns: 0, tokens: 0 };
+      held.turns += turn.turns;
+      held.tokens += sumTokens(turn.totals);
+      turnAccumulator.set(key, held);
+    }
+
     const { buckets, sessionsByProvider } = ownedContribution(
       environment,
       ownerScanByFingerprint,
@@ -435,7 +473,7 @@ export function mergeUsage(
     }
 
     for (const bucket of buckets) {
-      const tokens = bucketTokens(bucket);
+      const tokens = sumTokens(bucket.totals);
 
       costUsd += bucket.costUsd;
       cacheSavingsUsd += bucket.cacheSavingsUsd;
@@ -551,6 +589,7 @@ export function mergeUsage(
     }))
     .sort((a, b) => b.costUsd - a.costUsd);
 
+  // Turns attach only to models with transcript usage, which their averages are priced from.
   const models: ModelTotals[] = [...modelAccumulator.entries()]
     .map(([key, totals]) => ({
       model: key.slice(key.indexOf(" ") + 1),
@@ -563,6 +602,8 @@ export function mergeUsage(
       unpricedTokens: totals.unpricedTokens,
       costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
       tokenShare: totalTokens === 0 ? 0 : totals.totalTokens / totalTokens,
+      turns: turnAccumulator.get(key)?.turns ?? 0,
+      turnTokens: turnAccumulator.get(key)?.tokens ?? 0,
     }))
     .sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens);
 

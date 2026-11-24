@@ -44,6 +44,7 @@ import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as CodexUsageHistory from "./CodexUsageHistory.ts";
+import * as TurnUsageHistory from "./TurnUsageHistory.ts";
 import * as CursorAccountReader from "@t3tools/provider-cursor/server/CursorAccountReader";
 import * as CursorUsageAccounts from "@t3tools/provider-cursor/server/CursorUsageAccounts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -201,7 +202,11 @@ const layerService = (input: {
     Layer.provideMerge(AntigravityUsage.layer),
     Layer.provideMerge(MuseUsageHome.layer),
     Layer.provideMerge(ProviderHostLive.layer),
-    Layer.provideMerge(CodexUsageHistory.layer.pipe(Layer.provideMerge(Sqlite.layerMemory))),
+    Layer.provideMerge(
+      Layer.mergeAll(CodexUsageHistory.layer, TurnUsageHistory.layer).pipe(
+        Layer.provideMerge(Sqlite.layerMemory),
+      ),
+    ),
     Layer.provideMerge(Layer.mock(BackgroundPolicy.BackgroundPolicy)({})),
     Layer.provideMerge(
       Layer.mock(ServerSecretStore.ServerSecretStore)({
@@ -3125,6 +3130,144 @@ describe("UsageService", () => {
             home,
             settings: { ...settings, usageModelAliases: { "drift-9": "orbit-1" } },
             ratesDocument: rates,
+          }),
+        ),
+      );
+    }),
+  );
+
+  it.effect("totals T3 turns per model under the window, filter and aliases of transcripts", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      const seedTurn = (id: string, driver: string, completedAt: string, payload: object) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`INSERT INTO orchestration_v2_projection_provider_threads ${sql.insert({
+            provider_thread_id: `provider-thread-${id}`,
+            provider: driver,
+            driver,
+            status: "active",
+            updated_at: completedAt,
+            payload_json: "{}",
+          })}`;
+          yield* sql`INSERT INTO orchestration_v2_projection_provider_turns ${sql.insert({
+            provider_turn_id: `turn-${id}`,
+            thread_id: `thread-${id}`,
+            provider_thread_id: `provider-thread-${id}`,
+            node_id: `node-${id}`,
+            ordinal: 1,
+            status: "completed",
+            started_at: completedAt,
+            completed_at: completedAt,
+            payload_json: encodeUnknownJsonString(payload),
+          })}`;
+        });
+      const usage = (inputTokens: number, outputTokens: number, fields: object = {}) => ({
+        turnTokenUsage: {
+          usageScope: "main_agent",
+          usageStatus: "complete",
+          hasSubagents: false,
+          inputTokens,
+          outputTokens,
+          ...fields,
+        },
+      });
+      const turns = (summary: UsageSummary) =>
+        [...(summary.turns ?? [])].sort((a, b) => a.model.localeCompare(b.model));
+
+      yield* Effect.gen(function* () {
+        yield* seedTurn("aliased", "claudeAgent", "2026-08-01T10:00:00.000Z", {
+          model: "drift-9",
+          ...usage(100, 10, { cachedInputTokens: 60, cacheCreationTokens: 30, reasoningTokens: 4 }),
+        });
+        yield* seedTurn("kept", "claudeAgent", "2026-08-02T23:00:00.000Z", {
+          model: "orbit-1",
+          ...usage(50, 5),
+        });
+        yield* seedTurn("codex", "codex", "2026-08-01T12:00:00.000Z", {
+          ...usage(20, 2, { models: ["gpt-6-astra"], cachedInputTokens: 15 }),
+        });
+        // Each of these must stay out of the totals.
+        yield* seedTurn("after-window", "claudeAgent", "2026-08-03T00:30:00.000Z", {
+          model: "orbit-1",
+          ...usage(1, 1),
+        });
+        yield* seedTurn("partial", "claudeAgent", "2026-08-01T10:00:00.000Z", {
+          model: "orbit-1",
+          turnTokenUsage: {
+            usageScope: "main_agent",
+            usageStatus: "partial",
+            hasSubagents: false,
+            outputTokens: 1,
+          },
+        });
+        yield* seedTurn("local-command", "claudeAgent", "2026-08-01T10:00:00.000Z", {
+          model: "orbit-1",
+          ...usage(1, 1, { localCommand: true }),
+        });
+        yield* seedTurn("no-usage-reader", "kiro", "2026-08-01T10:00:00.000Z", {
+          model: "kiro-1",
+          ...usage(1, 1),
+        });
+        yield* seedTurn("two-models", "codex", "2026-08-01T10:00:00.000Z", {
+          ...usage(1, 1, { models: ["gpt-6-astra", "gpt-6-mini"] }),
+        });
+
+        const service = yield* UsageService.make;
+        const codex = {
+          provider: "codex",
+          model: "gpt-6-astra",
+          turns: 1,
+          totals: {
+            uncachedInputTokens: 5,
+            cachedInputTokens: 15,
+            cacheCreationTokens: 0,
+            outputTokens: 2,
+            reasoningTokens: 0,
+          },
+        };
+        assert.deepStrictEqual(turns(yield* service.readSummary(WINDOW)), [
+          codex,
+          {
+            provider: "claude",
+            model: "orbit-1",
+            turns: 2,
+            totals: {
+              uncachedInputTokens: 60,
+              cachedInputTokens: 60,
+              cacheCreationTokens: 30,
+              outputTokens: 15,
+              reasoningTokens: 4,
+            },
+          },
+        ]);
+        // The filter matches the original ID, so the aliased turn is left out.
+        const excluded = yield* service.readSummary({
+          ...WINDOW,
+          modelFilter: { exclude: [{ model: "drift-9" }] },
+        });
+        assert.deepStrictEqual(turns(excluded), [
+          codex,
+          {
+            provider: "claude",
+            model: "orbit-1",
+            turns: 1,
+            totals: {
+              uncachedInputTokens: 50,
+              cachedInputTokens: 0,
+              cacheCreationTokens: 0,
+              outputTokens: 5,
+              reasoningTokens: 0,
+            },
+          },
+        ]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          layerService({
+            prefix: "usage-service-turns-test",
+            home,
+            settings: { ...settings, usageModelAliases: { "drift-9": "orbit-1" } },
           }),
         ),
       );

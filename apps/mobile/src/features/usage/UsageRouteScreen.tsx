@@ -9,10 +9,14 @@ import {
   usageProgress,
 } from "@t3tools/client-runtime/state/usage-progress";
 import {
+  cacheHitRate,
+  costPerTurn,
   isCompatibleUsageContractVersion,
   isModelCostUnknown,
+  tokensPerTurn,
   type DailyTotals,
   type MergedUsage,
+  type ModelTotals,
 } from "@t3tools/shared/usageMerge";
 import {
   enumerateDays,
@@ -891,6 +895,7 @@ function ModelsSection(props: {
                         tokens: formatTokens(model.totalTokens),
                       })}
               </Text>
+              <ModelRates model={model} metric={metric} />
             </View>
             <Text className="text-base tabular-nums text-foreground">
               {metric === "tokens"
@@ -904,6 +909,26 @@ function ModelsSection(props: {
       </View>
     </SettingsSection>
   );
+}
+
+function ModelRates(props: { readonly model: ModelTotals; readonly metric: UsageChartMetric }) {
+  const { model, metric } = props;
+  const gt = useGT();
+  const hitRate = cacheHitRate(model);
+  const rate = hitRate === null ? null : formatPercent(hitRate);
+  const perTurn = metric === "tokens" ? tokensPerTurn(model) : costPerTurn(model);
+  const amount =
+    perTurn === null ? null : metric === "tokens" ? formatTokens(perTurn) : formatUsd(perTurn);
+  const text =
+    rate !== null && amount !== null
+      ? gt("{rate} cache hit · {amount} per turn", { rate, amount })
+      : rate !== null
+        ? gt("{rate} cache hit", { rate })
+        : amount !== null
+          ? gt("{amount} per turn", { amount })
+          : null;
+  if (text === null) return null;
+  return <Text className="text-xs tabular-nums text-foreground-tertiary">{text}</Text>;
 }
 
 function usageEnvironmentStatus(

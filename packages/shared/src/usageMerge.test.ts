@@ -10,7 +10,16 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
-import { isModelCostUnknown, mergeUsage, type EnvironmentUsage } from "./usageMerge.ts";
+import {
+  cacheHitRate,
+  costPerMillionTokens,
+  costPerTurn,
+  isModelCostUnknown,
+  mergeUsage,
+  tokensPerTurn,
+  type EnvironmentUsage,
+  type ModelTotals,
+} from "./usageMerge.ts";
 
 const decodeSummary = Schema.decodeUnknownSync(UsageSummary);
 
@@ -472,6 +481,79 @@ describe("mergeUsage", () => {
     expect(merged.models.filter(isModelCostUnknown).map((model) => model.model)).toEqual([
       "unknown-model",
     ]);
+  });
+
+  it("counts cache writes as misses and leaves unpriced tokens out of $/1M", () => {
+    const mixed: ModelTotals = {
+      model: "mixed",
+      provider: "codex",
+      costUsd: 6,
+      totalTokens: 4_000_000,
+      tokens: {
+        uncachedInputTokens: 1_000_000,
+        cachedInputTokens: 1_000_000,
+        cacheCreationTokens: 2_000_000,
+        outputTokens: 0,
+        reasoningTokens: 0,
+      },
+      records: 4,
+      unpricedRecords: 1,
+      unpricedTokens: 1_000_000,
+      costShare: 0,
+      tokenShare: 0,
+      turns: 0,
+      turnTokens: 0,
+    };
+
+    expect(cacheHitRate(mixed)).toBe(0.25);
+    expect(costPerMillionTokens(mixed)).toBe(2);
+    expect(costPerMillionTokens({ ...mixed, unpricedRecords: 4 })).toBeNull();
+  });
+
+  it("averages each model's T3 turns across environments at the model's effective rate", () => {
+    const turn = (model: string, turns: number, uncachedInputTokens: number) => ({
+      provider: "claude" as const,
+      model,
+      turns,
+      totals: {
+        uncachedInputTokens,
+        cachedInputTokens: 900,
+        cacheCreationTokens: 0,
+        outputTokens: 100,
+        reasoningTokens: 0,
+      },
+    });
+    const merged = mergeUsage(
+      [
+        environment("env-a", {
+          ...summary(
+            [bucket({ costUsd: 11.6 }), bucket({ provider: "codex", model: "gpt-5" })],
+            [
+              { provider: "claude", hostId: "mac", homePath: "/a/.claude" },
+              { provider: "codex", hostId: "mac", homePath: "/a/.codex" },
+            ],
+          ),
+          turns: [turn("claude-fable-5", 2, 500), turn("no-transcript-usage", 1, 0)],
+        }),
+        environment("env-b", {
+          ...summary(
+            [bucket({ costUsd: 11.6 })],
+            [{ provider: "claude", hostId: "linux", homePath: "/b/.claude" }],
+          ),
+          turns: [turn("claude-fable-5", 1, 0)],
+        }),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+
+    const byModel = new Map(merged.models.map((model) => [model.model, model]));
+    const fable = byModel.get("claude-fable-5")!;
+    expect([fable.turns, fable.turnTokens]).toEqual([3, 2500]);
+    expect(tokensPerTurn(fable)).toBeCloseTo(2500 / 3);
+    // 23.2 USD over 2,320 transcript tokens is one cent per token.
+    expect(costPerTurn(fable)).toBeCloseTo(25 / 3);
+    expect(costPerTurn(byModel.get("gpt-5")!)).toBeNull();
+    expect(byModel.has("no-transcript-usage")).toBe(false);
   });
 
   it("splits cost by category and speed, counting older servers as unsplit standard cost", () => {
