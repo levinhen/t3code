@@ -31,6 +31,12 @@ rm -rf "$out"
   --platform mac --target dir --arch arm64 --build-version "$build_version" --output-dir "$out")
 built="$(ls -d "$out"/mac-arm64/*.app | head -1)"
 
+# Replacing or re-signing a running app breaks it, so build first and swap once it has quit.
+while pgrep -qf '/Applications/T3 Code \(Fork\)\.app/Contents/MacOS/'; do
+  echo "Built. Quit $app_name to finish installing..."
+  sleep 3
+done
+
 # The fork applies newer migrations to the shared database; keep a copy from before this build.
 if [ -f "$HOME/.t3/userdata/statev2.sqlite" ]; then
   mkdir -p "$backup_dir"

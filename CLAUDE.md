@@ -2,7 +2,7 @@
 
 ## Fork: desktop app
 
-- `scripts/fork-desktop-install.sh` builds this checkout and installs it as `/Applications/T3 Code (Fork).app` (`com.t3tools.t3code.fork`) beside the official app. Run it on the Mac. Without Rust it reuses the official app's resource monitor; it backs up `~/.t3/userdata/statev2.sqlite` to `~/.t3/backups` before installing.
+- `scripts/fork-desktop-install.sh` builds this checkout and installs it as `/Applications/T3 Code (Fork).app` (`com.t3tools.t3code.fork`) beside the official app. Run it on the Mac. Without Rust it reuses the official app's resource monitor; it backs up `~/.t3/userdata/statev2.sqlite` to `~/.t3/backups` before installing. If the Fork app is running, the script builds and then waits for it to quit before replacing it, so run it from Terminal (quitting the app ends any agent session inside it).
 - `scripts/fork-sign.sh <app>` signs with a self-signed identity kept in `~/.config/t3code-fork-signing` (created on first use). The install script calls it. Builds keep the same signing requirement, so Keychain "Always Allow" and macOS privacy grants carry over to later builds; deleting that keychain costs one more prompt. Never re-sign a running app.
 - Both apps share `~/.t3/userdata` and the Electron profile, so only one runs at a time.
 - A dev server (`vp run dev`) can start under the `mac` runner's sandbox (using `~/.t3/dev` or the worktree's `.t3`, never `~/.t3/userdata`): `/bin/ps` is allowed, and blocked reads of `~/.claude` / `~/.claude.json` / `~/.codex` only log non-fatal provider/telemetry warnings (the "Replay (dev)" provider works without them).
