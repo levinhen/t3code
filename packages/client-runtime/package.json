@@ -463,6 +463,10 @@
       "types": "./src/state/contextWindow.ts",
       "default": "./src/state/contextWindow.ts"
     },
+    "./state/turn-usage": {
+      "types": "./src/state/turnUsage.ts",
+      "default": "./src/state/turnUsage.ts"
+    },
     "./state/thread-subagents": {
       "types": "./src/state/threadSubagents.ts",
       "default": "./src/state/threadSubagents.ts"

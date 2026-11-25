@@ -3139,7 +3139,13 @@ describe("UsageService", () => {
   it.effect("totals T3 turns per model under the window, filter and aliases of transcripts", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
-      const seedTurn = (id: string, driver: string, completedAt: string, payload: object) =>
+      const seedTurn = (
+        id: string,
+        driver: string,
+        completedAt: string,
+        payload: object,
+        startedAt: string | null = completedAt,
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
           yield* sql`INSERT INTO orchestration_v2_projection_provider_threads ${sql.insert({
@@ -3157,7 +3163,7 @@ describe("UsageService", () => {
             node_id: `node-${id}`,
             ordinal: 1,
             status: "completed",
-            started_at: completedAt,
+            started_at: startedAt,
             completed_at: completedAt,
             payload_json: encodeUnknownJsonString(payload),
           })}`;
@@ -3176,14 +3182,28 @@ describe("UsageService", () => {
         [...(summary.turns ?? [])].sort((a, b) => a.model.localeCompare(b.model));
 
       yield* Effect.gen(function* () {
-        yield* seedTurn("aliased", "claudeAgent", "2026-08-01T10:00:00.000Z", {
-          model: "drift-9",
-          ...usage(100, 10, { cachedInputTokens: 60, cacheCreationTokens: 30, reasoningTokens: 4 }),
-        });
-        yield* seedTurn("kept", "claudeAgent", "2026-08-02T23:00:00.000Z", {
-          model: "orbit-1",
-          ...usage(50, 5),
-        });
+        yield* seedTurn(
+          "aliased",
+          "claudeAgent",
+          "2026-08-01T10:00:00.000Z",
+          {
+            model: "drift-9",
+            ...usage(100, 10, {
+              cachedInputTokens: 60,
+              cacheCreationTokens: 30,
+              reasoningTokens: 4,
+            }),
+          },
+          "2026-08-01T09:59:50.000Z",
+        );
+        // Without a start time, this turn counts toward totals but not toward speed.
+        yield* seedTurn(
+          "kept",
+          "claudeAgent",
+          "2026-08-02T23:00:00.000Z",
+          { model: "orbit-1", ...usage(50, 5) },
+          null,
+        );
         yield* seedTurn("codex", "codex", "2026-08-01T12:00:00.000Z", {
           ...usage(20, 2, { models: ["gpt-6-astra"], cachedInputTokens: 15 }),
         });
@@ -3215,7 +3235,7 @@ describe("UsageService", () => {
 
         const service = yield* UsageService.make;
         const codex = {
-          provider: "codex",
+          provider: "codex" as const,
           model: "gpt-6-astra",
           turns: 1,
           totals: {
@@ -3225,6 +3245,7 @@ describe("UsageService", () => {
             outputTokens: 2,
             reasoningTokens: 0,
           },
+          timing: { outputTokens: 2, durationMs: 0 },
         };
         assert.deepStrictEqual(turns(yield* service.readSummary(WINDOW)), [
           codex,
@@ -3239,6 +3260,7 @@ describe("UsageService", () => {
               outputTokens: 15,
               reasoningTokens: 4,
             },
+            timing: { outputTokens: 10, durationMs: 10_000 },
           },
         ]);
         // The filter matches the original ID, so the aliased turn is left out.

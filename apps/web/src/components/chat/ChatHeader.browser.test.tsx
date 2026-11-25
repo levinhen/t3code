@@ -1,4 +1,5 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderThreadId, ThreadId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
@@ -23,8 +24,9 @@ vi.mock(import("~/hooks/useThreadActionMenu"), () => ({
 
 import { render, stubGlobal } from "../../../test/render";
 import { ChatHeader } from "./ChatHeader";
+import type { UsageTurn } from "./ThreadTurnUsagePills";
 
-function header(title: string) {
+function header(title: string, lastUsageTurn: UsageTurn | null = null) {
   return (
     <>
       <ChatHeader
@@ -34,6 +36,7 @@ function header(title: string) {
         isServerThread
         activeProject={null}
         parentThreadLink={null}
+        lastUsageTurn={lastUsageTurn}
         onOpenThread={() => {}}
         rightPanelOpen={false}
         onNewThreadInProject={() => {}}
@@ -102,4 +105,25 @@ it("keeps the Escape that cancels a rename from also reaching window shortcuts",
   await expect.element(input).not.toBeInTheDocument();
   expect(persisted.title).toBe("New thread");
   expect(windowEscapes).toEqual([true]);
+});
+
+it("shows the last turn's cache hit, tokens and speed beside the title", async () => {
+  await using screen = await render(
+    header("New thread", {
+      providerThreadId: ProviderThreadId.make("provider-thread"),
+      startedAt: DateTime.makeUnsafe("2026-11-24T10:00:00Z"),
+      completedAt: DateTime.makeUnsafe("2026-11-24T10:00:20Z"),
+      turnTokenUsage: {
+        usageScope: "main_agent",
+        usageStatus: "complete",
+        hasSubagents: false,
+        inputTokens: 1_000,
+        cachedInputTokens: 900,
+        outputTokens: 400,
+      },
+    }),
+  );
+  await expect.element(screen.getByText("Cache 90%")).toBeInTheDocument();
+  await expect.element(screen.getByText("Turn 1.40K")).toBeInTheDocument();
+  await expect.element(screen.getByText("20 tok/s")).toBeInTheDocument();
 });

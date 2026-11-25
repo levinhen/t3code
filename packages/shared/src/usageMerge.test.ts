@@ -16,6 +16,7 @@ import {
   costPerTurn,
   isModelCostUnknown,
   mergeUsage,
+  outputTokensPerSecond,
   tokensPerTurn,
   type EnvironmentUsage,
   type ModelTotals,
@@ -503,6 +504,8 @@ describe("mergeUsage", () => {
       tokenShare: 0,
       turns: 0,
       turnTokens: 0,
+      timedOutputTokens: 0,
+      turnDurationMs: 0,
     };
 
     expect(cacheHitRate(mixed)).toBe(0.25);
@@ -510,7 +513,7 @@ describe("mergeUsage", () => {
     expect(costPerMillionTokens({ ...mixed, unpricedRecords: 4 })).toBeNull();
   });
 
-  it("averages each model's T3 turns across environments at the model's effective rate", () => {
+  it("averages each model's T3 turns and output speed across environments", () => {
     const turn = (model: string, turns: number, uncachedInputTokens: number) => ({
       provider: "claude" as const,
       model,
@@ -533,7 +536,13 @@ describe("mergeUsage", () => {
               { provider: "codex", hostId: "mac", homePath: "/a/.codex" },
             ],
           ),
-          turns: [turn("claude-fable-5", 2, 500), turn("no-transcript-usage", 1, 0)],
+          turns: [
+            {
+              ...turn("claude-fable-5", 2, 500),
+              timing: { outputTokens: 200, durationMs: 10_000 },
+            },
+            turn("no-transcript-usage", 1, 0),
+          ],
         }),
         environment("env-b", {
           ...summary(
@@ -553,6 +562,9 @@ describe("mergeUsage", () => {
     // 23.2 USD over 2,320 transcript tokens is one cent per token.
     expect(costPerTurn(fable)).toBeCloseTo(25 / 3);
     expect(costPerTurn(byModel.get("gpt-5")!)).toBeNull();
+    // env-b predates turn timing, so its turn adds no output to the speed either.
+    expect(outputTokensPerSecond(fable)).toBe(20);
+    expect(outputTokensPerSecond(byModel.get("gpt-5")!)).toBeNull();
     expect(byModel.has("no-transcript-usage")).toBe(false);
   });
 

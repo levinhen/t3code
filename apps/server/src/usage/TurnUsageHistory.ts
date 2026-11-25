@@ -21,6 +21,8 @@ export interface TurnUsage {
   readonly driver: string;
   readonly model: string;
   readonly completedAtMs: number;
+  /** Wall time from start to completion; null when the turn never recorded its start. */
+  readonly durationMs: number | null;
   readonly totals: UsageTokenTotals;
 }
 
@@ -47,11 +49,13 @@ const make = Effect.gen(function* () {
       readonly driver: string | null;
       readonly model: string | null;
       readonly usage_json: string | null;
+      readonly started_at: string | null;
       readonly completed_at: string;
     }>`
       SELECT thread.driver AS driver,
         json_extract(turn.payload_json, '$.model') AS model,
         json_extract(turn.payload_json, '$.turnTokenUsage') AS usage_json,
+        turn.started_at AS started_at,
         turn.completed_at AS completed_at
       FROM orchestration_v2_projection_provider_turns AS turn
       JOIN orchestration_v2_projection_provider_threads AS thread
@@ -82,11 +86,16 @@ const make = Effect.gen(function* () {
       if (!model || inputTokens + outputTokens === 0) return [];
       const cachedInputTokens = usage.value.cachedInputTokens ?? 0;
       const cacheCreationTokens = usage.value.cacheCreationTokens ?? 0;
+      const completedAtMs = DateTime.toEpochMillis(completedAt.value);
+      const startedAt = row.started_at === null ? Option.none() : DateTime.make(row.started_at);
       return [
         {
           driver: row.driver,
           model,
-          completedAtMs: DateTime.toEpochMillis(completedAt.value),
+          completedAtMs,
+          durationMs: Option.isNone(startedAt)
+            ? null
+            : Math.max(0, completedAtMs - DateTime.toEpochMillis(startedAt.value)),
           totals: {
             // Reported input includes cache reads and writes.
             uncachedInputTokens: Math.max(0, inputTokens - cachedInputTokens - cacheCreationTokens),

@@ -39,6 +39,9 @@ export interface ModelTotals {
   /** Turns T3 ran with reported usage, and their tokens; 0 from servers that predate them. */
   readonly turns: number;
   readonly turnTokens: number;
+  /** Output and wall time of the turns that recorded their start; 0 from servers that predate them. */
+  readonly timedOutputTokens: number;
+  readonly turnDurationMs: number;
 }
 
 /** When every record lacks rates, costUsd is unknown and must not be displayed as a dollar figure. */
@@ -62,6 +65,13 @@ export function costPerMillionTokens(model: ModelTotals): number | null {
 
 export function tokensPerTurn(model: ModelTotals): number | null {
   return model.turns === 0 ? null : model.turnTokens / model.turns;
+}
+
+/** Wall time includes tool calls and waits, so this reads below the model's generation rate. */
+export function outputTokensPerSecond(model: ModelTotals): number | null {
+  return model.turnDurationMs < 1_000
+    ? null
+    : model.timedOutputTokens / (model.turnDurationMs / 1_000);
 }
 
 /** Turns carry tokens but no price, so this applies the model's effective rate to its average turn. */
@@ -439,14 +449,24 @@ export function mergeUsage(
   >();
   const contributingEnvironments: EnvironmentId[] = [];
   // Each server counts only the turns it ran, so turns never repeat across environments.
-  const turnAccumulator = new Map<string, { turns: number; tokens: number }>();
+  const turnAccumulator = new Map<
+    string,
+    { turns: number; tokens: number; timedOutputTokens: number; durationMs: number }
+  >();
 
   for (const environment of current) {
     for (const turn of environment.summary.turns ?? []) {
       const key = `${turn.provider} ${turn.model}`;
-      const held = turnAccumulator.get(key) ?? { turns: 0, tokens: 0 };
+      const held = turnAccumulator.get(key) ?? {
+        turns: 0,
+        tokens: 0,
+        timedOutputTokens: 0,
+        durationMs: 0,
+      };
       held.turns += turn.turns;
       held.tokens += sumTokens(turn.totals);
+      held.timedOutputTokens += turn.timing?.outputTokens ?? 0;
+      held.durationMs += turn.timing?.durationMs ?? 0;
       turnAccumulator.set(key, held);
     }
 
@@ -604,6 +624,8 @@ export function mergeUsage(
       tokenShare: totalTokens === 0 ? 0 : totals.totalTokens / totalTokens,
       turns: turnAccumulator.get(key)?.turns ?? 0,
       turnTokens: turnAccumulator.get(key)?.tokens ?? 0,
+      timedOutputTokens: turnAccumulator.get(key)?.timedOutputTokens ?? 0,
+      turnDurationMs: turnAccumulator.get(key)?.durationMs ?? 0,
     }))
     .sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens);
 

@@ -5,6 +5,7 @@ import {
   costPerMillionTokens,
   costPerTurn,
   isModelCostUnknown,
+  outputTokensPerSecond,
   tokensPerTurn,
   type ModelTotals,
 } from "@t3tools/shared/usageMerge";
@@ -63,6 +64,7 @@ export function UsageModelDialog({
   const perMillion = costPerMillionTokens(model);
   const turnTokens = tokensPerTurn(model);
   const turnCost = costPerTurn(model);
+  const speed = outputTokensPerSecond(model);
   const stats = [
     { label: gt("Cost"), value: costUnknown ? gt("Unpriced") : formatUsd(model.costUsd, locale) },
     { label: gt("Tokens"), value: formatTokens(model.totalTokens) },
@@ -75,6 +77,12 @@ export function UsageModelDialog({
       : { label: gt("Turns in T3"), value: formatCount(model.turns, locale) },
     turnTokens === null ? null : { label: gt("Tokens per turn"), value: formatTokens(turnTokens) },
     turnCost === null ? null : { label: gt("Cost per turn"), value: formatUsd(turnCost, locale) },
+    speed === null
+      ? null
+      : {
+          label: gt("Output speed"),
+          value: gt("{speed} tok/s", { speed: formatCount(speed, locale) }),
+        },
   ].filter((stat) => stat !== null);
 
   return (

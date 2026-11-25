@@ -27,6 +27,7 @@ import {
   costPerTurn,
   isCompatibleUsageContractVersion,
   isModelCostUnknown,
+  outputTokensPerSecond,
   tokensPerTurn,
   type DailyTotals,
   type HourlyTotals,
@@ -939,6 +940,9 @@ function UsageOverview({
                 <th className="hidden py-2 pl-6 font-normal md:table-cell">
                   <T context="column heading, average cost or tokens of one turn">Per turn</T>
                 </th>
+                <th className="hidden py-2 pl-6 font-normal lg:table-cell">
+                  <T context="column heading, output tokens per second">Speed</T>
+                </th>
                 <th className="py-2 pr-2 pl-6 font-normal">
                   <T>Tokens</T>
                 </th>
@@ -947,7 +951,7 @@ function UsageOverview({
             <tbody>
               {breakdownModels.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={8} className="py-6 text-center text-muted-foreground">
                     <T>No activity in this window.</T>
                   </td>
                 </tr>
@@ -959,6 +963,7 @@ function UsageOverview({
                   const share = modelShare(model, metric === "tokens" ? "tokens" : "cost");
                   const hitRate = cacheHitRate(model);
                   const perTurn = metric === "tokens" ? tokensPerTurn(model) : costPerTurn(model);
+                  const speed = outputTokensPerSecond(model);
                   const rowFigures = figureClass(loadingProviders.has(model.provider));
                   return (
                     <tr
@@ -1011,6 +1016,11 @@ function UsageOverview({
                           : metric === "tokens"
                             ? formatTokens(perTurn)
                             : formatUsd(perTurn, locale)}
+                      </td>
+                      <td className={cn("hidden py-2.5 pl-6 lg:table-cell", rowFigures)}>
+                        {speed === null
+                          ? ""
+                          : gt("{speed} tok/s", { speed: formatCount(speed, locale) })}
                       </td>
                       <td className={cn("py-2.5 pr-2 pl-6", rowFigures)}>
                         {formatTokens(model.totalTokens)}

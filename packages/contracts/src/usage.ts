@@ -78,6 +78,10 @@ export const UsageTurnTotals = Schema.Struct({
   model: TrimmedNonEmptyString,
   turns: NonNegativeInt,
   totals: UsageTokenTotals,
+  /** Output and wall time of the turns that recorded their start; wall time includes tools and waits. */
+  timing: Schema.optional(
+    Schema.Struct({ outputTokens: NonNegativeInt, durationMs: NonNegativeInt }),
+  ),
 });
 export type UsageTurnTotals = typeof UsageTurnTotals.Type;
 

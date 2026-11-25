@@ -139,6 +139,7 @@ export function aggregateTurnUsage(
   turns: Iterable<{
     readonly provider: UsageRecord["provider"];
     readonly model: string;
+    readonly durationMs: number | null;
     readonly totals: UsageTokenTotals;
   }>,
   options: Pick<AggregateOptions, "modelAliases" | "modelFilter">,
@@ -149,6 +150,13 @@ export function aggregateTurnUsage(
     const model = options.modelAliases?.get(turn.model) ?? turn.model;
     const key = `${turn.provider}\u0000${model}`;
     const held = byModel.get(key);
+    const timing =
+      turn.durationMs === null
+        ? held?.timing
+        : {
+            outputTokens: (held?.timing?.outputTokens ?? 0) + turn.totals.outputTokens,
+            durationMs: (held?.timing?.durationMs ?? 0) + turn.durationMs,
+          };
     byModel.set(key, {
       provider: turn.provider,
       model,
@@ -162,6 +170,7 @@ export function aggregateTurnUsage(
         outputTokens: (held?.totals.outputTokens ?? 0) + turn.totals.outputTokens,
         reasoningTokens: (held?.totals.reasoningTokens ?? 0) + turn.totals.reasoningTokens,
       },
+      ...(timing === undefined ? {} : { timing }),
     });
   }
   return [...byModel.values()];

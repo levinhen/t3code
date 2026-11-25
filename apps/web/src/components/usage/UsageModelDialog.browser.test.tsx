@@ -27,6 +27,8 @@ describe("UsageModelDialog", () => {
           tokenShare: 1,
           turns: 0,
           turnTokens: 0,
+          timedOutputTokens: 0,
+          turnDurationMs: 0,
         }}
         environments={[]}
         metric="cost"

@@ -45,6 +45,7 @@ import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { useClientSettings } from "../../hooks/useSettings";
 import { GuestShareIndicator } from "./GuestShareControls";
+import { ThreadTurnUsagePills, type UsageTurn } from "./ThreadTurnUsagePills";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -54,6 +55,7 @@ interface ChatHeaderProps {
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
   parentThreadLink: { threadId: ThreadId; title: string } | null;
+  lastUsageTurn: UsageTurn | null;
   onOpenThread: (threadId: ThreadId) => void;
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
@@ -79,6 +81,7 @@ export const ChatHeader = memo(function ChatHeader({
   isServerThread,
   activeProject,
   parentThreadLink,
+  lastUsageTurn,
   onOpenThread,
   rightPanelOpen,
   onNewThreadInProject,
@@ -410,6 +413,9 @@ export const ChatHeader = memo(function ChatHeader({
                 </T>
               </TooltipPopup>
             </Tooltip>
+          ) : null}
+          {renamingTitle === null && lastUsageTurn !== null ? (
+            <ThreadTurnUsagePills turn={lastUsageTurn} />
           ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>

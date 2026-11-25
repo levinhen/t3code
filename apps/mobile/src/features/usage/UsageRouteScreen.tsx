@@ -13,6 +13,7 @@ import {
   costPerTurn,
   isCompatibleUsageContractVersion,
   isModelCostUnknown,
+  outputTokensPerSecond,
   tokensPerTurn,
   type DailyTotals,
   type MergedUsage,
@@ -919,16 +920,14 @@ function ModelRates(props: { readonly model: ModelTotals; readonly metric: Usage
   const perTurn = metric === "tokens" ? tokensPerTurn(model) : costPerTurn(model);
   const amount =
     perTurn === null ? null : metric === "tokens" ? formatTokens(perTurn) : formatUsd(perTurn);
-  const text =
-    rate !== null && amount !== null
-      ? gt("{rate} cache hit · {amount} per turn", { rate, amount })
-      : rate !== null
-        ? gt("{rate} cache hit", { rate })
-        : amount !== null
-          ? gt("{amount} per turn", { amount })
-          : null;
-  if (text === null) return null;
-  return <Text className="text-xs tabular-nums text-foreground-tertiary">{text}</Text>;
+  const speed = outputTokensPerSecond(model);
+  const parts = [
+    rate === null ? null : gt("{rate} cache hit", { rate }),
+    amount === null ? null : gt("{amount} per turn", { amount }),
+    speed === null ? null : gt("{speed} tok/s", { speed: formatCount(speed) }),
+  ].filter((part) => part !== null);
+  if (parts.length === 0) return null;
+  return <Text className="text-xs tabular-nums text-foreground-tertiary">{parts.join(" · ")}</Text>;
 }
 
 function usageEnvironmentStatus(
