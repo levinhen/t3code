@@ -45,6 +45,6 @@ plist="$dest/Contents/Info.plist"
 # Leave CFBundleName alone: Electron finds "<CFBundleName> Helper.app" at startup and aborts if it is missing.
 /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $app_name" "$plist"
-codesign --force --deep --sign - "$dest"
+bash "$repo/scripts/fork-sign.sh" "$dest"
 
 echo "Installed $dest ($build_version)."
