@@ -42,7 +42,7 @@ rm -rf "$dest"
 ditto "$built" "$dest"
 plist="$dest/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleName $app_name" "$plist"
+# Leave CFBundleName alone: Electron finds "<CFBundleName> Helper.app" at startup and aborts if it is missing.
 /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $app_name" "$plist"
 codesign --force --deep --sign - "$dest"
