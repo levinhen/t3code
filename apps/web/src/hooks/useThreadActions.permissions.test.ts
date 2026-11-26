@@ -52,6 +52,10 @@ const state = vi.hoisted(() => ({
   toasts: [] as string[],
   afterRequest: undefined as ((action: string) => void) | undefined,
   sessionLookupFails: false,
+  worktreeStatus: null as {
+    hasWorkingTreeChanges: boolean;
+    workingTree: { files: { path: string }[] };
+  } | null,
 }));
 
 vi.mock("react", () => ({
@@ -75,6 +79,11 @@ vi.mock("../state/use-atom-command", () => ({
   useAtomCommand:
     (action: string) =>
     async (request: { environmentId: string; input: { threadId?: string } }) => {
+      if (action === "refreshLocalStatusForPicker") {
+        return state.worktreeStatus === null
+          ? AsyncResult.failure(Cause.fail(new Error("Status read failed")))
+          : AsyncResult.success(state.worktreeStatus);
+      }
       state.requests.push({ action, ...request });
       const scope =
         action === "removeWorktree" ? AuthSourceControlWriteScope : AuthOrchestrationOperateScope;
@@ -128,7 +137,11 @@ vi.mock("../state/threads", () => ({
   ),
 }));
 vi.mock("../state/vcs", () => ({
-  vcsEnvironment: { removeWorktree: "removeWorktree", refreshStatus: "refreshStatus" },
+  vcsEnvironment: {
+    removeWorktree: "removeWorktree",
+    refreshStatus: "refreshStatus",
+    refreshLocalStatusForPicker: "refreshLocalStatusForPicker",
+  },
 }));
 vi.mock("../state/entities", () => ({
   readEnvironmentServerConfigLoaded: () => true,
@@ -286,6 +299,7 @@ beforeEach(() => {
   state.toasts = [];
   state.afterRequest = undefined;
   state.sessionLookupFails = false;
+  state.worktreeStatus = null;
   useRightPanelStore.setState(useRightPanelStore.getInitialState(), true);
   useDiffPanelStore.setState(useDiffPanelStore.getInitialState(), true);
   usePreviewMiniPlayerStore.setState(usePreviewMiniPlayerStore.getInitialState(), true);
@@ -446,8 +460,17 @@ describe("thread action permissions", () => {
         sideChat: true,
       },
     });
+    state.worktreeStatus = {
+      hasWorkingTreeChanges: true,
+      workingTree: { files: [{ path: "a.ts" }, { path: "b.ts" }] },
+    };
     expect((await useThreadActions().deleteThread(target))._tag).toBe("Success");
     expect(state.confirm).toHaveBeenCalledOnce();
+    // Removal is forced, so the prompt names the uncommitted work it would discard.
+    expect(state.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("uncommitted changes in 2 files"),
+      { variant: "destructive" },
+    );
     expect(state.requests.map((request) => request.action)).toEqual([
       "stopSession",
       "delete",

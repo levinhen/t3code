@@ -11,7 +11,7 @@ import type { ThreadStructureRuntime } from "@t3tools/client-runtime/state/shell
 import * as Schema from "effect/Schema";
 import { msg } from "gt-react";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
-import { workspaceRelativeFilePath } from "@t3tools/shared/path";
+import { normalizeProjectPathForComparison, workspaceRelativeFilePath } from "@t3tools/shared/path";
 import { toSortableTimestamp } from "@t3tools/client-runtime/state/thread-sort";
 import { m, type MessageResolver } from "../i18n/messages";
 import { deriveCanInterruptRunningThread } from "../session-logic";
@@ -147,54 +147,67 @@ export function resolveLockedWorkspaceLabel(
     return activeWorktreePath.split(/[\\/]/).findLast(Boolean) ?? resolve(msg("Worktree"));
   return effectiveEnvMode === "worktree"
     ? resolveEnvModeLabel("worktree", resolve)
-    : resolve(msg("Local checkout"));
+    : resolveLocalCheckoutLabel(resolve);
 }
 
-export interface PreviousWorktreeSeed {
+/** The project's own folder, as opposed to any worktree of it. */
+export function resolveLocalCheckoutLabel(resolve: MessageResolver = m): string {
+  return resolve(msg("Local checkout"));
+}
+
+export interface RecentWorktree {
   branch: string | null;
   worktreePath: string;
+  /** The title of the worktree's most recently updated thread. */
+  threadTitle: string;
 }
 
-export function resolvePreviousWorktreeSeed(input: {
+const RECENT_WORKTREE_LIMIT = 5;
+
+/** The project's worktrees by latest thread activity, newest first, leaving out the current one. */
+export function resolveRecentWorktrees(input: {
   threads: ReadonlyArray<{
     branch: string | null;
     worktreePath: string | null;
+    title: string;
     updatedAt: string;
     archivedAt?: string | null;
   }>;
   currentWorktreePath: string | null;
-}): PreviousWorktreeSeed | null {
-  let latest: { branch: string | null; worktreePath: string; updatedAt: number } | null = null;
+  limit?: number;
+}): RecentWorktree[] {
+  const currentKey =
+    input.currentWorktreePath === null
+      ? null
+      : normalizeProjectPathForComparison(input.currentWorktreePath);
+  // Threads can store one worktree as `/repo/wt` and `/repo/wt/`.
+  const latestByWorktree = new Map<string, RecentWorktree & { updatedAt: number }>();
   for (const thread of input.threads) {
-    if (
-      !thread.worktreePath ||
-      thread.worktreePath === input.currentWorktreePath ||
-      (thread.archivedAt ?? null) !== null
-    ) {
-      continue;
-    }
+    if (!thread.worktreePath || (thread.archivedAt ?? null) !== null) continue;
+    const key = normalizeProjectPathForComparison(thread.worktreePath);
+    if (key === currentKey) continue;
     const updatedAt = toSortableTimestamp(thread.updatedAt);
-    if (updatedAt === null) {
-      continue;
-    }
-    if (latest === null || updatedAt > latest.updatedAt) {
-      latest = {
+    if (updatedAt === null) continue;
+    const latest = latestByWorktree.get(key);
+    if (latest === undefined || updatedAt > latest.updatedAt) {
+      latestByWorktree.set(key, {
         branch: thread.branch,
         worktreePath: thread.worktreePath,
+        threadTitle: thread.title,
         updatedAt,
-      };
+      });
     }
   }
-  return latest === null ? null : { branch: latest.branch, worktreePath: latest.worktreePath };
+  return [...latestByWorktree.values()]
+    .toSorted((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, input.limit ?? RECENT_WORKTREE_LIMIT)
+    .map(({ updatedAt: _updatedAt, ...worktree }) => worktree);
 }
 
-export function resolvePreviousWorktreeLabel(
-  seed: PreviousWorktreeSeed,
-  resolve: MessageResolver = m,
+export function resolveRecentWorktreeLabel(
+  worktree: Pick<RecentWorktree, "branch" | "worktreePath">,
 ): string {
-  return seed.branch
-    ? resolve(msg("Previous worktree ({branch})", { branch: seed.branch }))
-    : resolve(msg("Previous worktree"));
+  return worktree.branch ?? worktree.worktreePath.split(/[\\/]/).findLast(Boolean) ?? "";
 }
 
 export function resolveEffectiveEnvMode(input: {

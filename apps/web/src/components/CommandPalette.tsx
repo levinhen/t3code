@@ -192,6 +192,7 @@ import {
   newProjectId,
 } from "../lib/utils";
 import { buildThreadRouteParams } from "../threadRoutes";
+import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
 import {
   applyWslEnvironmentConfiguration,
@@ -1369,6 +1370,27 @@ function OpenCommandPaletteDialog(props: {
             activeThread: activeThread ?? undefined,
             defaultProjectRef,
             handleNewThread,
+          });
+        },
+      });
+    }
+
+    const activeWorktreePath = activeThread?.worktreePath ?? null;
+    if (activeThread && activeWorktreePath !== null) {
+      const { environmentId, projectId, branch } = activeThread;
+      actionItems.push({
+        kind: "action",
+        value: "action:new-thread-in-worktree",
+        searchTerms: ["new thread", "worktree", "same", "branch", "continue"],
+        title: gt("New thread in this worktree"),
+        description: branch ?? formatWorktreePathForDisplay(activeWorktreePath),
+        icon: <FolderGit2Icon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await handleNewThread(scopeProjectRef(environmentId, projectId), {
+            branch,
+            worktreePath: activeWorktreePath,
+            envMode: "worktree",
+            startFromOrigin: false,
           });
         },
       });

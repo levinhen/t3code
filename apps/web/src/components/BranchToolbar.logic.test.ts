@@ -18,6 +18,8 @@ import {
   resolveDefaultWorktreeBaseBranch,
   resolveLocalCheckoutBranchMismatch,
   resolveLockedWorkspaceLabel,
+  resolveRecentWorktreeLabel,
+  resolveRecentWorktrees,
   sanitizeNewRefName,
   shouldIncludeBranchPickerItem,
   isBranchHoldCurrent,
@@ -159,6 +161,60 @@ describe("resolveLockedWorkspaceLabel", () => {
     ["C:\\Users\\me\\worktrees\\feature-x", "feature-x"],
   ])("names the worktree at %s", (path, label) => {
     expect(resolveLockedWorkspaceLabel(path, "worktree")).toBe(label);
+  });
+});
+
+describe("resolveRecentWorktrees", () => {
+  const thread = (
+    worktreePath: string | null,
+    updatedAt: string,
+    extra: { branch?: string | null; title?: string; archivedAt?: string | null } = {},
+  ) => ({
+    branch: extra.branch ?? null,
+    worktreePath,
+    title: extra.title ?? "Thread",
+    updatedAt,
+    archivedAt: extra.archivedAt ?? null,
+  });
+
+  it("lists each worktree once, newest activity first, named by its latest thread", () => {
+    const recent = resolveRecentWorktrees({
+      threads: [
+        thread("/wt/a", "2026-11-01T00:00:00Z", { branch: "feat/a", title: "Old A" }),
+        thread("/wt/b", "2026-11-03T00:00:00Z", { branch: "feat/b", title: "B" }),
+        thread("/wt/a/", "2026-11-04T00:00:00Z", { branch: "feat/a", title: "New A" }),
+        thread(null, "2026-11-05T00:00:00Z"),
+      ],
+      currentWorktreePath: null,
+    });
+
+    expect(recent).toEqual([
+      { branch: "feat/a", worktreePath: "/wt/a/", threadTitle: "New A" },
+      { branch: "feat/b", worktreePath: "/wt/b", threadTitle: "B" },
+    ]);
+  });
+
+  it("leaves out the current worktree, archived threads, and anything past the limit", () => {
+    const recent = resolveRecentWorktrees({
+      threads: [
+        thread("/wt/current/", "2026-11-09T00:00:00Z"),
+        thread("/wt/archived", "2026-11-08T00:00:00Z", { archivedAt: "2026-11-08T01:00:00Z" }),
+        thread("/wt/1", "2026-11-07T00:00:00Z"),
+        thread("/wt/2", "2026-11-06T00:00:00Z"),
+        thread("/wt/3", "2026-11-05T00:00:00Z"),
+      ],
+      currentWorktreePath: "/wt/current",
+      limit: 2,
+    });
+
+    expect(recent.map((worktree) => worktree.worktreePath)).toEqual(["/wt/1", "/wt/2"]);
+  });
+
+  it("names a worktree by its branch, or its folder when it has none", () => {
+    expect(resolveRecentWorktreeLabel({ branch: "feat/a", worktreePath: "/wt/a" })).toBe("feat/a");
+    expect(resolveRecentWorktreeLabel({ branch: null, worktreePath: "C:\\wt\\t3-1234" })).toBe(
+      "t3-1234",
+    );
   });
 });
 

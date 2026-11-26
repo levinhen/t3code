@@ -5,13 +5,16 @@ import { memo, type MouseEvent as ReactMouseEvent } from "react";
 import { T, useGT, useMessages } from "gt-react";
 
 import {
+  type RecentWorktree,
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
+  resolveLocalCheckoutLabel,
   resolveLockedWorkspaceLabel,
+  resolveRecentWorktreeLabel,
   type EnvMode,
 } from "./BranchToolbar.logic";
 import { useComposerMenuProps } from "./chat/composerEventScope";
-import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
+import { RecentWorktreeItemContent } from "./RecentWorktreeItemContent";
 import {
   Select,
   SelectGroup,
@@ -25,7 +28,8 @@ import { useAtomValue } from "@effect/atom-react";
 import { shortcutLabelForCommand } from "../keybindings";
 import { primaryServerKeybindingsAtom } from "../state/server";
 
-const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
+const RECENT_WORKTREE_SELECT_VALUE_PREFIX = "recent-worktree:";
+const LOCAL_CHECKOUT_SELECT_VALUE = "local-checkout";
 
 interface BranchToolbarEnvModeSelectorProps {
   forceNewWorktree?: boolean;
@@ -33,9 +37,10 @@ interface BranchToolbarEnvModeSelectorProps {
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
-  previousWorktreeLabel?: string | null;
-  previousWorktreeBranch?: string | null;
-  onUsePreviousWorktree?: () => void;
+  recentWorktrees?: readonly RecentWorktree[];
+  onUseRecentWorktree?: (worktree: RecentWorktree) => void;
+  /** Set while a new thread sits in a worktree it picked, to move it back to the project folder. */
+  onUseLocalCheckout?: (() => void) | null;
 }
 
 export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSelector({
@@ -44,9 +49,9 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   effectiveEnvMode,
   activeWorktreePath,
   onEnvModeChange,
-  previousWorktreeLabel,
-  previousWorktreeBranch = null,
-  onUsePreviousWorktree,
+  recentWorktrees = [],
+  onUseRecentWorktree,
+  onUseLocalCheckout = null,
 }: BranchToolbarEnvModeSelectorProps) {
   const gt = useGT();
   const m = useMessages();
@@ -55,16 +60,20 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
     useAtomValue(primaryServerKeybindingsAtom),
     "composer.workspace",
   );
-  const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
+  const shownRecentWorktrees = onUseRecentWorktree ? recentWorktrees : [];
   const envModeItems = [
     {
       value: "local",
       label: resolveCurrentWorkspaceLabel(activeWorktreePath, m),
     },
-    { value: "worktree", label: resolveEnvModeLabel("worktree", m) },
-    ...(showPreviousWorktree && previousWorktreeLabel
-      ? [{ value: PREVIOUS_WORKTREE_SELECT_VALUE, label: previousWorktreeLabel }]
+    ...(onUseLocalCheckout
+      ? [{ value: LOCAL_CHECKOUT_SELECT_VALUE, label: resolveLocalCheckoutLabel(m) }]
       : []),
+    { value: "worktree", label: resolveEnvModeLabel("worktree", m) },
+    ...shownRecentWorktrees.map((worktree, index) => ({
+      value: `${RECENT_WORKTREE_SELECT_VALUE_PREFIX}${index}`,
+      label: resolveRecentWorktreeLabel(worktree),
+    })),
   ];
 
   const stopContextMenuMouseDown = (event: ReactMouseEvent) => {
@@ -112,8 +121,14 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       modal={false}
       value={effectiveEnvMode}
       onValueChange={(value: string | null) => {
-        if (value === PREVIOUS_WORKTREE_SELECT_VALUE) {
-          onUsePreviousWorktree?.();
+        if (value === LOCAL_CHECKOUT_SELECT_VALUE) {
+          onUseLocalCheckout?.();
+          return;
+        }
+        if (value?.startsWith(RECENT_WORKTREE_SELECT_VALUE_PREFIX)) {
+          const worktree =
+            shownRecentWorktrees[Number(value.slice(RECENT_WORKTREE_SELECT_VALUE_PREFIX.length))];
+          if (worktree) onUseRecentWorktree?.(worktree);
           return;
         }
         onEnvModeChange(value as EnvMode);
@@ -154,7 +169,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       <SelectPopup
         alignItemWithTrigger={false}
         {...composerFloatingLayerProps}
-        className={showPreviousWorktree ? "w-[min(21rem,calc(100vw-2rem))]" : undefined}
+        className={shownRecentWorktrees.length > 0 ? "w-[min(21rem,calc(100vw-2rem))]" : undefined}
       >
         <SelectGroup>
           <SelectGroupLabel>
@@ -170,18 +185,36 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
               {resolveCurrentWorkspaceLabel(activeWorktreePath, m)}
             </span>
           </SelectItem>
+          {onUseLocalCheckout ? (
+            <SelectItem value={LOCAL_CHECKOUT_SELECT_VALUE}>
+              <span className="inline-flex items-center gap-1.5">
+                <FolderIcon className="size-3" />
+                {resolveLocalCheckoutLabel(m)}
+              </span>
+            </SelectItem>
+          ) : null}
           <SelectItem value="worktree">
             <span className="inline-flex items-center gap-1.5">
               <FolderGit2Icon className="size-3" />
               {resolveEnvModeLabel("worktree", m)}
             </span>
           </SelectItem>
-          {showPreviousWorktree && previousWorktreeLabel ? (
-            <SelectItem value={PREVIOUS_WORKTREE_SELECT_VALUE}>
-              <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
-            </SelectItem>
-          ) : null}
         </SelectGroup>
+        {shownRecentWorktrees.length > 0 ? (
+          <SelectGroup>
+            <SelectGroupLabel>
+              <T>Recent worktrees</T>
+            </SelectGroupLabel>
+            {shownRecentWorktrees.map((worktree, index) => (
+              <SelectItem
+                key={worktree.worktreePath}
+                value={`${RECENT_WORKTREE_SELECT_VALUE_PREFIX}${index}`}
+              >
+                <RecentWorktreeItemContent worktree={worktree} />
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        ) : null}
       </SelectPopup>
     </Select>
   );

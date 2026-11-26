@@ -56,7 +56,11 @@ import { clearThreadPreviewState } from "../previewStateStore";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
-import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
+import {
+  describeWorktreeRemoval,
+  formatWorktreePathForDisplay,
+  getOrphanedWorktreePathForThread,
+} from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import * as ThreadUndo from "@t3tools/client-runtime/state/thread-undo";
@@ -359,6 +363,9 @@ export function useThreadActions() {
   const refreshVcsStatus = useAtomCommand(vcsEnvironment.refreshStatus, {
     reportFailure: false,
   });
+  const readWorktreeStatus = useAtomCommand(vcsEnvironment.refreshLocalStatusForPicker, {
+    reportFailure: false,
+  });
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder);
   const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
   const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin);
@@ -583,13 +590,27 @@ export function useThreadActions() {
     const automaticWorktreeCleanup = environmentSettings
       ? resolveWorktreeCleanup(environmentSettings, thread.projectId).worktreeOnDelete
       : false;
-    if (canDeleteWorktree && localApi && !automaticWorktreeCleanup) {
+    if (
+      canDeleteWorktree &&
+      localApi &&
+      orphanedWorktreePath !== null &&
+      !automaticWorktreeCleanup
+    ) {
+      // Removal is forced, so say what it would discard. A failed read leaves the plain prompt.
+      const worktreeStatus = await readWorktreeStatus({
+        environmentId: threadRef.environmentId,
+        input: { cwd: orphanedWorktreePath },
+      });
       const confirmationResult = await settlePromise(() =>
         localApi.dialogs.confirm(
           [
             m(msg("This thread is the only one linked to this worktree:")),
             displayWorktreePath ?? orphanedWorktreePath,
             "",
+            ...describeWorktreeRemoval({
+              branch: thread.branch,
+              status: worktreeStatus._tag === "Success" ? worktreeStatus.value : null,
+            }),
             m(msg("Delete the worktree too?")),
           ].join("\n"),
           { variant: "destructive" },

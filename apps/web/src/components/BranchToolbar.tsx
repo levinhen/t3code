@@ -36,9 +36,10 @@ import {
   resolveContextStripLabelsCompact,
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
+  resolveLocalCheckoutLabel,
   resolveLockedWorkspaceLabel,
-  resolvePreviousWorktreeLabel,
-  resolvePreviousWorktreeSeed,
+  resolveRecentWorktrees,
+  type RecentWorktree,
   shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
 import {
@@ -49,7 +50,7 @@ import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSele
 import { openAddProjectToMachine } from "./AddProjectToMachineDialog";
 import { type AddProjectTarget, useAddProjectTargets } from "../hooks/useAddProjectTargets";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
-import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
+import { RecentWorktreeItemContent } from "./RecentWorktreeItemContent";
 import { WorktreeRepositoriesControl } from "./WorktreeRepositoriesControl";
 import { useWorktreeBaseBranch } from "../worktreeRepositoryChoiceStore";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
@@ -174,9 +175,9 @@ interface RunContextSelectorProps {
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
-  previousWorktreeLabel: string | null;
-  previousWorktreeBranch: string | null;
-  onUsePreviousWorktree: () => void;
+  recentWorktrees: readonly RecentWorktree[];
+  onUseRecentWorktree: (worktree: RecentWorktree) => void;
+  onUseLocalCheckout: (() => void) | null;
   addTargets: readonly AddProjectTarget[];
   onAddToMachine: (environmentId: EnvironmentId) => void;
 }
@@ -198,9 +199,9 @@ const RunContextSelector = memo(function RunContextSelector({
   effectiveEnvMode: requestedEnvMode,
   activeWorktreePath,
   onEnvModeChange,
-  previousWorktreeLabel,
-  previousWorktreeBranch,
-  onUsePreviousWorktree,
+  recentWorktrees,
+  onUseRecentWorktree,
+  onUseLocalCheckout,
   addTargets,
   onAddToMachine,
 }: RunContextSelectorProps) {
@@ -348,7 +349,7 @@ const RunContextSelector = memo(function RunContextSelector({
         className={
           isPanel
             ? "w-(--anchor-width)"
-            : previousWorktreeLabel
+            : recentWorktrees.length > 0
               ? "w-[min(21rem,calc(100vw-2rem))]"
               : undefined
         }
@@ -439,8 +440,8 @@ const RunContextSelector = memo(function RunContextSelector({
             <MenuRadioGroup
               value={effectiveEnvMode}
               onValueChange={(value) => {
-                if (value === "previous-worktree") {
-                  onUsePreviousWorktree();
+                if (value === "local-checkout") {
+                  onUseLocalCheckout?.();
                   return;
                 }
                 onEnvModeChange(value as EnvMode);
@@ -460,18 +461,33 @@ const RunContextSelector = memo(function RunContextSelector({
                   <MiddleTruncate value={resolveCurrentWorkspaceLabel(activeWorktreePath, m)} />
                 </span>
               </MenuRadioItem>
+              {onUseLocalCheckout ? (
+                <MenuRadioItem value="local-checkout" closeOnClick>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <FolderIcon className="size-3" />
+                    <span className="min-w-0 truncate">{resolveLocalCheckoutLabel(m)}</span>
+                  </span>
+                </MenuRadioItem>
+              ) : null}
               <MenuRadioItem disabled={envModeLocked} value="worktree" closeOnClick>
                 <span className="flex min-w-0 items-center gap-1.5">
                   <FolderGit2Icon className="size-3" />
                   <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree", m)}</span>
                 </span>
               </MenuRadioItem>
-              {previousWorktreeLabel ? (
-                <MenuRadioItem disabled={envModeLocked} value="previous-worktree" closeOnClick>
-                  <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
-                </MenuRadioItem>
-              ) : null}
             </MenuRadioGroup>
+          </MenuGroup>
+        ) : null}
+        {offersWorkspaceModes && recentWorktrees.length > 0 ? (
+          <MenuGroup>
+            <MenuGroupLabel>
+              <T>Recent worktrees</T>
+            </MenuGroupLabel>
+            {recentWorktrees.map((worktree) => (
+              <MenuItem key={worktree.worktreePath} onClick={() => onUseRecentWorktree(worktree)}>
+                <RecentWorktreeItemContent worktree={worktree} />
+              </MenuItem>
+            ))}
           </MenuGroup>
         ) : null}
       </MenuPopup>
@@ -679,45 +695,47 @@ export const BranchToolbar = memo(function BranchToolbar({
   const effectiveEnvMode = forceNewWorktree ? "worktree" : envMode;
   const envModeLocked = envLocked || (isServerThread && activeWorktreePath !== null);
 
-  const canUsePreviousWorktree = !isServerThread && !envModeLocked && !forceNewWorktree;
-  const projectRefsForWorktreeLookup = canUsePreviousWorktree ? [activeProjectRef] : [];
+  const canUseRecentWorktree = !isServerThread && !envModeLocked && !forceNewWorktree;
+  const projectRefsForWorktreeLookup = canUseRecentWorktree ? [activeProjectRef] : [];
   const projectThreads = useThreadShellsForProjectRefs(projectRefsForWorktreeLookup);
-  const previousWorktreeSeed = canUsePreviousWorktree
-    ? resolvePreviousWorktreeSeed({
+  const recentWorktrees = canUseRecentWorktree
+    ? resolveRecentWorktrees({
         threads: projectThreads,
         currentWorktreePath: activeWorktreePath,
       })
-    : null;
-  const previousWorktreeLabel = previousWorktreeSeed
-    ? resolvePreviousWorktreeLabel(previousWorktreeSeed, m)
-    : null;
-  const onUsePreviousWorktree = () => {
-    if (!previousWorktreeSeed) return;
+    : [];
+  const onUseRecentWorktree = (worktree: RecentWorktree) => {
     setDraftThreadContext(draftId ?? threadRef, {
-      branch: previousWorktreeSeed.branch,
-      worktreePath: previousWorktreeSeed.worktreePath,
+      branch: worktree.branch,
+      worktreePath: worktree.worktreePath,
       envMode: "worktree",
       projectRef: activeProjectRef,
     });
   };
+  // The way back out of a worktree a new thread picked; the branch follows the project folder.
+  const onUseLocalCheckout =
+    canUseRecentWorktree && activeWorktreePath !== null
+      ? () =>
+          setDraftThreadContext(draftId ?? threadRef, {
+            branch: null,
+            worktreePath: null,
+            envMode: "local",
+            projectRef: activeProjectRef,
+          })
+      : null;
 
   useImperativeHandle(
     ref,
     () => ({
       openBranchPicker: () => branchSelectorRef.current?.open(),
       usePreviousWorktree: () => {
-        if (!showGitControls || !canUsePreviousWorktree || !previousWorktreeSeed) return;
-        onUsePreviousWorktree();
+        const [latest] = recentWorktrees;
+        if (!showGitControls || !latest) return;
+        onUseRecentWorktree(latest);
         onComposerFocusRequest?.();
       },
     }),
-    [
-      canUsePreviousWorktree,
-      onComposerFocusRequest,
-      onUsePreviousWorktree,
-      previousWorktreeSeed,
-      showGitControls,
-    ],
+    [onComposerFocusRequest, onUseRecentWorktree, recentWorktrees, showGitControls],
   );
 
   const addTargets = useAddProjectTargets(activeProject, availableEnvironments);
@@ -768,9 +786,9 @@ export const BranchToolbar = memo(function BranchToolbar({
             effectiveEnvMode={effectiveEnvMode}
             activeWorktreePath={activeWorktreePath}
             onEnvModeChange={onEnvModeChange}
-            previousWorktreeLabel={previousWorktreeLabel}
-            previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
-            onUsePreviousWorktree={onUsePreviousWorktree}
+            recentWorktrees={recentWorktrees}
+            onUseRecentWorktree={onUseRecentWorktree}
+            onUseLocalCheckout={onUseLocalCheckout}
             addTargets={addTargets}
             onAddToMachine={onAddToMachine}
           />
@@ -819,9 +837,9 @@ export const BranchToolbar = memo(function BranchToolbar({
             effectiveEnvMode={effectiveEnvMode}
             activeWorktreePath={activeWorktreePath}
             onEnvModeChange={onEnvModeChange}
-            previousWorktreeLabel={previousWorktreeLabel}
-            previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
-            onUsePreviousWorktree={onUsePreviousWorktree}
+            recentWorktrees={recentWorktrees}
+            onUseRecentWorktree={onUseRecentWorktree}
+            onUseLocalCheckout={onUseLocalCheckout}
             addTargets={addTargets}
             onAddToMachine={onAddToMachine}
           />
@@ -862,9 +880,9 @@ export const BranchToolbar = memo(function BranchToolbar({
               effectiveEnvMode={effectiveEnvMode}
               activeWorktreePath={activeWorktreePath}
               onEnvModeChange={onEnvModeChange}
-              previousWorktreeLabel={previousWorktreeLabel}
-              previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
-              onUsePreviousWorktree={onUsePreviousWorktree}
+              recentWorktrees={recentWorktrees}
+              onUseRecentWorktree={onUseRecentWorktree}
+              onUseLocalCheckout={onUseLocalCheckout}
             />
           ) : null}
         </div>
