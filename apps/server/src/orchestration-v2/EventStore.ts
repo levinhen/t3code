@@ -1,5 +1,6 @@
 import {
   type ApplicationProjectEvent,
+  type ApplicationTaskGroupEvent,
   type ApplicationStoredEvent,
   CommandId,
   OrchestrationV2DomainEvent,
@@ -55,6 +56,9 @@ export interface EventStoreV2Shape {
   readonly appendProjectEvent: (
     event: OrchestrationEventStore.UnsequencedProjectEvent,
   ) => Effect.Effect<ApplicationProjectEvent, EventStoreV2Error>;
+  readonly appendTaskGroupEvent: (
+    event: OrchestrationEventStore.UnsequencedTaskGroupEvent,
+  ) => Effect.Effect<ApplicationTaskGroupEvent, EventStoreV2Error>;
   readonly read: (input?: {
     readonly afterSequence?: number;
     readonly throughSequence?: number;
@@ -121,6 +125,13 @@ const layerBase: Layer.Layer<EventStoreV2, never, OrchestrationEventStore.Orches
         appendProjectEvent: Effect.fn("EventStoreV2.appendProjectEvent")(function (event) {
           return applicationEvents
             .appendProjectEvent(event)
+            .pipe(
+              Effect.mapError((cause) => new EventStoreAppendEventsError({ eventCount: 1, cause })),
+            );
+        }),
+        appendTaskGroupEvent: Effect.fn("EventStoreV2.appendTaskGroupEvent")(function (event) {
+          return applicationEvents
+            .appendTaskGroupEvent(event)
             .pipe(
               Effect.mapError((cause) => new EventStoreAppendEventsError({ eventCount: 1, cause })),
             );

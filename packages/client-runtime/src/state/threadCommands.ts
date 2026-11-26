@@ -51,6 +51,7 @@ import {
   reorderPinnedThread,
   reorderActiveThread,
   setThreadSidebarParent,
+  setThreadTaskGroup,
   setThreadAutoSettle,
   settleThread,
   snoozeThread,
@@ -282,6 +283,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     setSidebarParent: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:set-sidebar-parent",
       execute: setThreadSidebarParent,
+      scheduler,
+      concurrency,
+    }),
+    setTaskGroup: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:set-task-group",
+      execute: setThreadTaskGroup,
       scheduler,
       concurrency,
     }),
@@ -636,6 +643,11 @@ export function createThreadEnvironmentAtoms<R, E>(
           }
         : {}),
     })),
+    setTaskGroup: optimistic.wrap(rowAction(commands.setTaskGroup), (thread, input) =>
+      (thread.taskGroupId ?? null) === input.taskGroupId
+        ? thread
+        : { ...thread, taskGroupId: input.taskGroupId },
+    ),
     reorderActive: optimistic.wrap(commands.reorderActive, (thread, input) => ({
       ...thread,
       activeOrderKey: input.orderKey,

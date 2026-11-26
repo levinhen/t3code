@@ -1,6 +1,7 @@
 import {
   ApplicationEventMetadata,
   ApplicationProjectEvent,
+  ApplicationTaskGroupEvent,
   type ApplicationStoredEvent,
   CommandId,
   EventId,
@@ -11,6 +12,7 @@ import {
   OrchestrationV2StoredEvent,
   ProjectId,
   StoredProjectIcon,
+  TaskGroupId,
   ThreadId,
   type OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
@@ -38,11 +40,11 @@ import {
 export const EVENT_LOG_PRUNED_THROUGH = "event-log-pruned-through";
 export const EVENT_LOG_PRUNE_MARK = "event-log-prune-mark";
 
-export type UnsequencedProjectEvent = ApplicationProjectEvent extends infer Event
-  ? Event extends ApplicationProjectEvent
-    ? Omit<Event, "sequence">
-    : never
+type WithoutSequence<Event> = Event extends { readonly sequence: number }
+  ? Omit<Event, "sequence">
   : never;
+export type UnsequencedProjectEvent = WithoutSequence<ApplicationProjectEvent>;
+export type UnsequencedTaskGroupEvent = WithoutSequence<ApplicationTaskGroupEvent>;
 
 export class OrchestrationEventStore extends Context.Service<
   OrchestrationEventStore,
@@ -50,6 +52,10 @@ export class OrchestrationEventStore extends Context.Service<
     readonly appendProjectEvent: (
       event: UnsequencedProjectEvent,
     ) => Effect.Effect<ApplicationProjectEvent, OrchestrationEventStoreError>;
+
+    readonly appendTaskGroupEvent: (
+      event: UnsequencedTaskGroupEvent,
+    ) => Effect.Effect<ApplicationTaskGroupEvent, OrchestrationEventStoreError>;
 
     readonly appendAgentEvents: (input: {
       readonly commandId?: CommandId;
@@ -126,6 +132,10 @@ export class OrchestrationEventStore extends Context.Service<
 
 const encodeProjectIcon = Schema.encodeSync(StoredProjectIcon);
 const decodeProjectEvent = Schema.decodeUnknownEffect(ApplicationProjectEvent);
+const decodeTaskGroupEvent = Schema.decodeUnknownEffect(ApplicationTaskGroupEvent);
+const decodeNonThreadEvent = Schema.decodeUnknownEffect(
+  Schema.Union([ApplicationProjectEvent, ApplicationTaskGroupEvent]),
+);
 const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown);
 const EventMetadataFromJsonString = Schema.fromJsonString(ApplicationEventMetadata);
 const ProjectEventType = Schema.Literals([
@@ -133,12 +143,21 @@ const ProjectEventType = Schema.Literals([
   "project.meta-updated",
   "project.deleted",
 ]);
+const TaskGroupEventType = Schema.Literals([
+  "task_group.created",
+  "task_group.updated",
+  "task_group.deleted",
+]);
+const NonThreadId = Schema.Union([ProjectId, TaskGroupId]);
+const NonThreadKind = Schema.Literals(["project", "task_group"]);
+const NonThreadEventType = Schema.Union([ProjectEventType, TaskGroupEventType]);
 const ActorKind = Schema.Literals(["client", "server", "provider"]);
 
-const AppendProjectEventRequestSchema = Schema.Struct({
+const AppendNonThreadEventRequestSchema = Schema.Struct({
   eventId: EventId,
-  streamId: ProjectId,
-  type: ProjectEventType,
+  streamId: NonThreadId,
+  aggregateKind: NonThreadKind,
+  type: NonThreadEventType,
   causationEventId: Schema.NullOr(EventId),
   correlationId: Schema.NullOr(CommandId),
   actorKind: ActorKind,
@@ -148,12 +167,12 @@ const AppendProjectEventRequestSchema = Schema.Struct({
   metadataJson: EventMetadataFromJsonString,
 });
 
-const ProjectEventPersistedRowSchema = Schema.Struct({
+const NonThreadEventPersistedRowSchema = Schema.Struct({
   sequence: NonNegativeInt,
   eventId: EventId,
-  type: ProjectEventType,
-  aggregateKind: Schema.Literal("project"),
-  aggregateId: ProjectId,
+  type: NonThreadEventType,
+  aggregateKind: NonThreadKind,
+  aggregateId: NonThreadId,
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -168,7 +187,7 @@ interface ApplicationEventRow {
   readonly sequence: number;
   readonly event_id: string;
   readonly command_id: string | null;
-  readonly aggregate_kind: "project" | "thread";
+  readonly aggregate_kind: "project" | "task_group" | "thread";
   readonly stream_id: string;
   readonly event_type: string;
   readonly occurred_at: string;
@@ -237,8 +256,8 @@ const rowToV2StoredEvent = Effect.fnUntraced(function* (row: ApplicationEventRow
   return { sequence, commandId, event };
 });
 
-const rowToProjectEvent = Effect.fnUntraced(function* (row: ApplicationEventRow) {
-  return yield* decodeProjectEvent({
+const rowToNonThreadEvent = Effect.fnUntraced(function* (row: ApplicationEventRow) {
+  return yield* decodeNonThreadEvent({
     sequence: row.sequence,
     eventId: row.event_id,
     type: row.event_type,
@@ -256,16 +275,19 @@ const rowToProjectEvent = Effect.fnUntraced(function* (row: ApplicationEventRow)
 function rowToApplicationStoredEvent(
   row: ApplicationEventRow,
 ): Effect.Effect<ApplicationStoredEvent, Schema.SchemaError> {
-  return row.aggregate_kind === "project" ? rowToProjectEvent(row) : rowToV2StoredEvent(row);
+  return row.aggregate_kind === "thread" ? rowToV2StoredEvent(row) : rowToNonThreadEvent(row);
 }
 
 const isKnownProjectEventType = Schema.is(ProjectEventType);
+const isKnownTaskGroupEventType = Schema.is(TaskGroupEventType);
 
 const keepKnownEventTypeRow = (row: ApplicationEventRow) =>
   (
     row.aggregate_kind === "project"
       ? isKnownProjectEventType(row.event_type)
-      : isKnownOrchestrationV2EventType(row.event_type)
+      : row.aggregate_kind === "task_group"
+        ? isKnownTaskGroupEventType(row.event_type)
+        : isKnownOrchestrationV2EventType(row.event_type)
   )
     ? Effect.succeed(true)
     : Effect.logWarning("Skipping an application event row with an unknown event type", {
@@ -274,7 +296,9 @@ const keepKnownEventTypeRow = (row: ApplicationEventRow) =>
         eventTypeLength: row.event_type.length,
       }).pipe(Effect.as(false));
 
-function inferActorKind(event: UnsequencedProjectEvent): typeof ActorKind.Type {
+function inferActorKind(
+  event: UnsequencedProjectEvent | UnsequencedTaskGroupEvent,
+): typeof ActorKind.Type {
   if (event.commandId !== null && event.commandId.startsWith("provider:")) {
     return "provider";
   }
@@ -318,9 +342,9 @@ const makeEventStore = Effect.gen(function* () {
     ELSE orchestration_events.payload_json
   END`;
 
-  const appendProjectEventRow = SqlSchema.findOne({
-    Request: AppendProjectEventRequestSchema,
-    Result: ProjectEventPersistedRowSchema,
+  const appendNonThreadEventRow = SqlSchema.findOne({
+    Request: AppendNonThreadEventRequestSchema,
+    Result: NonThreadEventPersistedRowSchema,
     execute: (request) =>
       sql`
         INSERT INTO orchestration_events (
@@ -340,13 +364,13 @@ const makeEventStore = Effect.gen(function* () {
         )
         VALUES (
           ${request.eventId},
-          'project',
+          ${request.aggregateKind},
           ${request.streamId},
           COALESCE(
             (
               SELECT stream_version + 1
               FROM orchestration_events
-              WHERE aggregate_kind = 'project'
+              WHERE aggregate_kind = ${request.aggregateKind}
                 AND stream_id = ${request.streamId}
               ORDER BY stream_version DESC
               LIMIT 1
@@ -379,7 +403,8 @@ const makeEventStore = Effect.gen(function* () {
   });
 
   const appendProjectEvent: OrchestrationEventStore["Service"]["appendProjectEvent"] = (event) =>
-    appendProjectEventRow({
+    appendNonThreadEventRow({
+      aggregateKind: event.aggregateKind,
       eventId: event.eventId,
       streamId: event.aggregateId,
       type: event.type,
@@ -399,6 +424,32 @@ const makeEventStore = Effect.gen(function* () {
         toPersistenceSqlOrDecodeError(
           "OrchestrationEventStore.appendProjectEvent:insert",
           "OrchestrationEventStore.appendProjectEvent:decode",
+        ),
+      ),
+    );
+
+  const appendTaskGroupEvent: OrchestrationEventStore["Service"]["appendTaskGroupEvent"] =
+    Effect.fn("OrchestrationEventStore.appendTaskGroupEvent")(
+      function* (event) {
+        const row = yield* appendNonThreadEventRow({
+          aggregateKind: event.aggregateKind,
+          eventId: event.eventId,
+          streamId: event.aggregateId,
+          type: event.type,
+          causationEventId: event.causationEventId,
+          correlationId: event.correlationId,
+          actorKind: inferActorKind(event),
+          occurredAt: event.occurredAt,
+          commandId: event.commandId,
+          payloadJson: event.payload,
+          metadataJson: event.metadata,
+        });
+        return yield* decodeTaskGroupEvent(row);
+      },
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "OrchestrationEventStore.appendTaskGroupEvent:insert",
+          "OrchestrationEventStore.appendTaskGroupEvent:decode",
         ),
       ),
     );
@@ -441,7 +492,7 @@ const makeEventStore = Effect.gen(function* () {
           ${
             input.onlyAgentEvents === true
               ? sql`application_event_version = 2 AND aggregate_kind = 'thread'`
-              : sql`aggregate_kind = 'project'
+              : sql`aggregate_kind IN ('project', 'task_group')
                     OR (application_event_version = 2 AND aggregate_kind = 'thread')`
           }
         )
@@ -647,7 +698,7 @@ const makeEventStore = Effect.gen(function* () {
       WHERE sequence > ${input.afterSequence}
         AND sequence <= ${input.throughSequence}
         AND (
-          aggregate_kind = 'project'
+          aggregate_kind IN ('project', 'task_group')
           OR (application_event_version = 2 AND aggregate_kind = 'thread')
         )
     `.pipe(
@@ -684,7 +735,7 @@ const makeEventStore = Effect.gen(function* () {
   const latestApplicationSequence = sql<{ readonly sequence: number | null }>`
     SELECT MAX(sequence) AS sequence
     FROM orchestration_events INDEXED BY idx_orchestration_events_application_high_water
-    WHERE aggregate_kind = 'project'
+    WHERE aggregate_kind IN ('project', 'task_group')
       OR (application_event_version = 2 AND aggregate_kind = 'thread')
   `.pipe(
     NodeSqliteClient.readOnly,
@@ -776,6 +827,7 @@ const makeEventStore = Effect.gen(function* () {
 
   return {
     appendProjectEvent,
+    appendTaskGroupEvent,
     appendAgentEvents,
     readAgentEvents,
     getAgentReplayStats,

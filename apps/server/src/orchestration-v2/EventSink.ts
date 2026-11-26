@@ -1,5 +1,9 @@
 import {
   CommandId,
+  EventId,
+  type OrchestrationV2AppThread,
+  TaskGroupError,
+  type TaskGroupId,
   type OrchestrationV2Run,
   OrchestrationV2DomainEvent,
   type OrchestrationV2ProviderThread,
@@ -14,6 +18,7 @@ import {
   type ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
+import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import * as ProviderCommitBatch from "./ProviderCommitBatch.ts";
 import * as ThreadViewers from "./ThreadViewers.ts";
 import * as Context from "effect/Context";
@@ -24,12 +29,16 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Semaphore from "effect/Semaphore";
 import * as Schema from "effect/Schema";
+import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlError from "effect/sql/SqlError";
 
 import { replayAndBufferProjectedLiveEvents } from "./LiveStreamBudget.ts";
-import type { UnsequencedProjectEvent } from "../persistence/OrchestrationEventStore.ts";
+import type {
+  UnsequencedProjectEvent,
+  UnsequencedTaskGroupEvent,
+} from "../persistence/OrchestrationEventStore.ts";
 import { projectStoredEventForWire } from "./WireProjection.ts";
 import { makeRunOutcomeRecorder, type RunOutcome } from "./RunMetrics.ts";
 
@@ -38,6 +47,7 @@ import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventStore from "./EventStore.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as TaskGroupStore from "./TaskGroupStore.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 
 export class EventSinkWriteError extends Schema.TaggedError<EventSinkWriteError>()(
@@ -217,6 +227,10 @@ export interface EventSinkV2Shape {
     };
     /** Like writeWithEffects' updateDelegatedCompletionOnly, for this run's run.updated only. */
     readonly updateDelegatedCompletionOnlyRunId?: RunId;
+    readonly expectedArchivedTaskGroup?: {
+      readonly taskGroupId: TaskGroupId;
+      readonly archivedAt: string;
+    };
   }) => Effect.Effect<
     {
       readonly receipt: CommandReceiptStore.CommandReceiptV2;
@@ -243,6 +257,19 @@ export interface EventSinkV2Shape {
     { readonly receipt: CommandReceiptStore.ProjectCommandReceiptV2; readonly committed: boolean },
     EventSinkV2Error
   >;
+  readonly commitTaskGroupChange: <A>(
+    plan: Effect.Effect<
+      {
+        readonly result: A;
+        readonly event?: UnsequencedTaskGroupEvent;
+        readonly memberships?: ReadonlyArray<{
+          readonly threadId: ThreadId;
+          readonly taskGroupId: TaskGroupId | null;
+        }>;
+      },
+      TaskGroupError | TaskGroupStore.TaskGroupStoreError
+    >,
+  ) => Effect.Effect<A, TaskGroupError | TaskGroupStore.TaskGroupStoreError | EventSinkV2Error>;
   readonly commitRejectedProjectCommand: (input: {
     readonly commandId: CommandId;
     readonly projectId: ProjectId;
@@ -250,6 +277,9 @@ export interface EventSinkV2Shape {
     readonly rejectedAt: DateTime.Utc;
     readonly error: string;
   }) => Effect.Effect<CommandReceiptStore.ProjectCommandReceiptV2, EventSinkV2Error>;
+  readonly subscribeLive: (
+    eventType: OrchestrationV2DomainEvent["type"],
+  ) => Effect.Effect<PubSub.Subscription<OrchestrationV2StoredEvent>, never, Scope.Scope>;
   readonly stream: (input?: {
     readonly threadId?: ThreadId;
     readonly afterSequence?: number;
@@ -277,6 +307,7 @@ const layerBase: Layer.Layer<
   | EventStore.EventStoreV2
   | ProjectionStore.ProjectionStoreV2
   | ProjectStore.ProjectStoreV2
+  | TaskGroupStore.TaskGroupStore
   | SqlClient.SqlClient
   | TurnItemPositionStore.TurnItemPositionStoreV2
   | ThreadViewers.ThreadViewers
@@ -290,6 +321,7 @@ const layerBase: Layer.Layer<
     const eventStore = yield* EventStore.EventStoreV2;
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
     const projectStore = yield* ProjectStore.ProjectStoreV2;
+    const taskGroups = yield* TaskGroupStore.TaskGroupStore;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
     const liveEvents = yield* PubSub.unbounded<OrchestrationV2StoredEvent>();
     const liveEventsByType = new Map<
@@ -400,6 +432,31 @@ const layerBase: Layer.Layer<
         });
       });
 
+    const requireTaskGroup = Effect.fn("EventSink.requireTaskGroup")(function* (
+      taskGroupId: TaskGroupId,
+    ) {
+      if (Option.isNone(yield* taskGroups.getShell(taskGroupId))) {
+        return yield* new TaskGroupError({ taskGroupId, reason: "not-found" });
+      }
+    });
+
+    const changeMembership = Effect.fn("EventSink.changeMembership")(function* (
+      thread: OrchestrationV2AppThread,
+      taskGroupId: TaskGroupId | null,
+      joining: ReadonlySet<ThreadId>,
+    ) {
+      if (taskGroupId !== null && thread.sidebarParent?.kind === "thread") {
+        const parentId = thread.sidebarParent.threadId;
+        if (!joining.has(parentId)) {
+          const parent = yield* projectionStore.findThread(parentId);
+          if (parent == null || parent.deletedAt !== null || parent.taskGroupId !== taskGroupId) {
+            return { ...thread, taskGroupId, sidebarParent: { kind: "top_level" as const } };
+          }
+        }
+      }
+      return { ...thread, taskGroupId };
+    });
+
     const normalizeEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) => {
       const runOrdinals = new Map(
         events.flatMap((event) =>
@@ -410,15 +467,34 @@ const layerBase: Layer.Layer<
       );
       return Effect.forEach(
         events,
-        (event): Effect.Effect<OrchestrationV2DomainEvent, unknown> =>
-          event.type === "turn-item.updated"
-            ? turnItemPositions
-                .normalize(
-                  event.payload,
-                  event.payload.runId === null ? undefined : runOrdinals.get(event.payload.runId),
-                )
-                .pipe(Effect.map((payload) => ({ ...event, payload })))
-            : Effect.succeed(event),
+        (event): Effect.Effect<OrchestrationV2DomainEvent, unknown> => {
+          if (event.type === "turn-item.updated") {
+            return turnItemPositions
+              .normalize(
+                event.payload,
+                event.payload.runId === null ? undefined : runOrdinals.get(event.payload.runId),
+              )
+              .pipe(Effect.map((payload) => ({ ...event, payload })));
+          }
+          if (event.type === "thread.created" && event.payload.taskGroupId != null) {
+            return requireTaskGroup(event.payload.taskGroupId).pipe(Effect.as(event));
+          }
+          if (event.type === "thread.task-group.updated") {
+            return Effect.gen(function* () {
+              const taskGroupId = event.payload.taskGroupId ?? null;
+              if (taskGroupId !== null) yield* requireTaskGroup(taskGroupId);
+              const thread = yield* projectionStore.getThread(event.threadId);
+              if (thread.deletedAt !== null) {
+                return yield* new ProjectionStore.ProjectionStoreThreadNotFoundError({
+                  threadId: event.threadId,
+                });
+              }
+              const payload = yield* changeMembership(thread, taskGroupId, new Set());
+              return { ...event, payload };
+            });
+          }
+          return Effect.succeed(event);
+        },
         { concurrency: 1 },
       );
     };
@@ -805,6 +881,34 @@ const layerBase: Layer.Layer<
             return { ...existing, committed: false as const, cancelledEffectIds: [] };
           }
 
+          if (input.expectedArchivedTaskGroup !== undefined) {
+            const { taskGroupId, archivedAt } = input.expectedArchivedTaskGroup;
+            const group = yield* taskGroups.getShell(taskGroupId);
+            const thread = yield* projectionStore.getThread(input.threadId);
+            if (
+              Option.isNone(group) ||
+              group.value.archivedAt !== archivedAt ||
+              thread.taskGroupId !== taskGroupId
+            ) {
+              const receipt: CommandReceiptStore.CommandReceiptV2 = {
+                commandId: input.commandId,
+                threadId: input.threadId,
+                commandType: input.commandType,
+                acceptedAt: input.acceptedAt,
+                resultSequence: yield* eventStore.latestSequence({ threadId: input.threadId }),
+                status: "rejected",
+                error: "Task group membership or archive state changed before settlement.",
+              };
+              yield* commandReceipts.upsert(receipt);
+              return {
+                receipt,
+                storedEvents: [],
+                committed: false as const,
+                cancelledEffectIds: [],
+              };
+            }
+          }
+
           // Planning does not lock the source. Once deletion commits, maintenance
           // can remove its checkpoints, so a new fork must not revive that history.
           if (input.commandType === "thread.fork") {
@@ -962,6 +1066,65 @@ const layerBase: Layer.Layer<
       },
     );
 
+    const commitTaskGroupChange: EventSinkV2Shape["commitTaskGroupChange"] = (plan) =>
+      commitThenPublish(
+        [],
+        Effect.gen(function* () {
+          const { result, event, memberships = [] } = yield* plan;
+          if (event === undefined) return { result, groupEvent: undefined, threadEvents: [] };
+          const applyChange = Effect.gen(function* () {
+            const groupEvent = yield* eventStore.appendTaskGroupEvent(event);
+            yield* taskGroups.apply(groupEvent);
+            const joining = new Set(memberships.map(({ threadId }) => threadId));
+            const events = yield* Effect.forEach(memberships, ({ threadId, taskGroupId }) =>
+              Effect.gen(function* () {
+                const current = yield* projectionStore.findThread(threadId);
+                if (current === null || current.deletedAt !== null) {
+                  return yield* new TaskGroupError({
+                    taskGroupId: groupEvent.aggregateId,
+                    reason: "invalid-member",
+                  });
+                }
+                const payload = yield* changeMembership(current, taskGroupId, joining);
+                return {
+                  id: EventId.make(yield* randomUuidV4),
+                  type: "thread.task-group.updated" as const,
+                  threadId,
+                  providerInstanceId: current.providerInstanceId,
+                  occurredAt: DateTime.makeUnsafe(groupEvent.occurredAt),
+                  payload,
+                };
+              }),
+            );
+            const threadEvents =
+              events.length === 0
+                ? []
+                : yield* eventStore.append({
+                    ...(groupEvent.commandId === null ? {} : { commandId: groupEvent.commandId }),
+                    events,
+                  });
+            yield* applyStoredEvents(threadEvents);
+            return { result, groupEvent, threadEvents };
+          });
+          return yield* applyChange.pipe(
+            Effect.mapError(
+              (cause) => new EventSinkWriteError({ eventCount: memberships.length + 1, cause }),
+            ),
+          );
+        }),
+        ({ groupEvent, threadEvents }) =>
+          groupEvent === undefined
+            ? Effect.void
+            : eventStore
+                .publishCommitted([groupEvent, ...threadEvents])
+                .pipe(Effect.andThen(publishLiveEvents(threadEvents))),
+      ).pipe(
+        Effect.catchTags({
+          SqlError: (cause) => Effect.fail(new EventSinkWriteError({ eventCount: 1, cause })),
+        }),
+        Effect.map(({ result }) => result),
+      );
+
     const commitRejectedProjectCommandEffect = Effect.fn(
       "orchestrationV2.EventSink.commitRejectedProjectCommand",
     )(function* (input: Parameters<EventSinkV2Shape["commitRejectedProjectCommand"]>[0]) {
@@ -1018,6 +1181,17 @@ const layerBase: Layer.Layer<
       return loop(input.afterSequence);
     };
 
+    const getLiveByType = Effect.fn("EventSink.getLiveByType")(function* (
+      eventType: OrchestrationV2DomainEvent["type"],
+    ) {
+      const existing = liveEventsByType.get(eventType);
+      if (existing !== undefined) return existing;
+      const created = yield* PubSub.unbounded<OrchestrationV2StoredEvent>();
+      const pubsub = liveEventsByType.get(eventType) ?? created;
+      liveEventsByType.set(eventType, pubsub);
+      return pubsub;
+    });
+
     const stream = (input?: Parameters<EventSinkV2Shape["stream"]>[0]) => {
       const afterSequence = input?.afterSequence ?? 0;
       const matches = (stored: OrchestrationV2StoredEvent) =>
@@ -1032,17 +1206,8 @@ const layerBase: Layer.Layer<
         }).pipe(Stream.filter(matches));
       return Stream.unwrap(
         Effect.gen(function* () {
-          let pubsub = liveEvents;
-          if (input?.eventType !== undefined) {
-            const existing = liveEventsByType.get(input.eventType);
-            if (existing !== undefined) {
-              pubsub = existing;
-            } else {
-              const created = yield* PubSub.unbounded<OrchestrationV2StoredEvent>();
-              pubsub = liveEventsByType.get(input.eventType) ?? created;
-              liveEventsByType.set(input.eventType, pubsub);
-            }
-          }
+          const pubsub =
+            input?.eventType === undefined ? liveEvents : yield* getLiveByType(input.eventType);
           if (input?.bounded === true) {
             return replayAndBufferProjectedLiveEvents({
               subscribe: PubSub.subscribe(pubsub),
@@ -1183,6 +1348,7 @@ const layerBase: Layer.Layer<
 
     return EventSinkV2.of({
       consumeProviderEvents: coordinator.consume,
+      subscribeLive: (eventType) => getLiveByType(eventType).pipe(Effect.flatMap(PubSub.subscribe)),
       withProviderBatch,
       write: (input) =>
         writeEffect({ ...input, effects: [] }).pipe(
@@ -1275,6 +1441,7 @@ const layerBase: Layer.Layer<
               new EventSinkWriteError({ commandId: input.commandId, eventCount: 1, cause }),
           ),
         ),
+      commitTaskGroupChange,
       commitRejectedProjectCommand: (input) =>
         commitRejectedProjectCommandEffect(input).pipe(
           Effect.mapError(
@@ -1319,13 +1486,13 @@ const layerBase: Layer.Layer<
 );
 
 /** Share the worker's outbox instance: enqueue wakeups are in-memory. */
-export const layerFromStores = layerBase;
+export const layerFromStores = layerBase.pipe(Layer.provide(TaskGroupStore.layer));
 
 export const layer: Layer.Layer<
   EventSinkV2,
   never,
   EventStore.EventStoreV2 | ProjectionStore.ProjectionStoreV2 | SqlClient.SqlClient
-> = layerBase.pipe(
+> = layerFromStores.pipe(
   Layer.provide(
     Layer.mergeAll(
       CommandReceiptStore.layer,

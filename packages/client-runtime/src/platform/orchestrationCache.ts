@@ -22,6 +22,8 @@ export const ShellCacheOrigin = Schema.Struct({
   databaseMigration: Schema.NullOr(Schema.Int),
   omitIdleSubagents: Schema.Boolean,
   omitOlderSettled: Schema.Boolean,
+  /** Older clients could save the shell cursor without storing task groups from that snapshot. */
+  tracksTaskGroups: Schema.optionalKey(Schema.Literal(true)),
   /** Epoch milliseconds of that snapshot; replay does not renew it. */
   snapshotAt: Schema.Number,
 });

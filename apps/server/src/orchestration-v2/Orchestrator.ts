@@ -661,6 +661,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.pin.reorder":
     case "thread.active.reorder":
     case "thread.sidebar-parent.set":
+    case "thread.taskGroup.set":
     case "thread.tag.set":
     case "thread.visit":
     case "thread.mark-unread":
@@ -4124,6 +4125,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       creationSource: command.creationSource,
       id: command.threadId,
       projectId: command.projectId,
+      taskGroupId: command.taskGroupId ?? null,
       title: command.title,
       ...(command.titleRenamed === true ? { titleRenamed: true } : {}),
       providerInstanceId: command.modelSelection.instanceId,
@@ -4468,6 +4470,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.pin.reorder"
           | "thread.tag.set"
           | "thread.sidebar-parent.set"
+          | "thread.taskGroup.set"
           | "thread.active.reorder"
           | "thread.mark-unread"
           | "thread.metadata.update"
@@ -5209,6 +5212,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: thread.updatedAt,
           };
         }
+        case "thread.taskGroup.set":
+          return { ...thread, taskGroupId: command.taskGroupId };
         case "thread.sidebar-parent.set": {
           return {
             ...thread,
@@ -5710,6 +5715,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.active-reordered" as const;
         case "thread.sidebar-parent.set":
           return "thread.sidebar-parent-updated" as const;
+        case "thread.taskGroup.set":
+          return "thread.task-group.updated" as const;
         case "thread.tag.set":
           return "thread.tags-updated" as const;
         case "thread.mark-unread":
@@ -16203,6 +16210,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.pin.reorder":
       case "thread.active.reorder":
       case "thread.sidebar-parent.set":
+      case "thread.taskGroup.set":
       case "thread.tag.set":
       case "thread.mark-unread":
       case "thread.pull-request.link":
@@ -16746,6 +16754,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 }).pipe(mapDispatchError(command)),
               ],
         effects: plan.effects,
+        ...(command.type === "thread.settle" && command.expectedArchivedTaskGroup !== undefined
+          ? { expectedArchivedTaskGroup: command.expectedArchivedTaskGroup }
+          : {}),
         ...(plan.cancelUnsettledEffects === undefined
           ? {}
           : { cancelUnsettledEffects: plan.cancelUnsettledEffects }),

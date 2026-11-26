@@ -5,6 +5,7 @@ import type {
   EnvironmentId,
   MessageId,
   OrchestrationProjectShell,
+  OrchestrationTaskGroupShell,
   OrchestrationV2ProviderGoal,
   OrchestrationV2RunStatus,
   OrchestrationV2ProviderFailureClass,
@@ -12,6 +13,7 @@ import type {
   OrchestrationV2ThreadShell,
   PlanId,
   ProjectId,
+  TaskGroupId,
   ProviderDriverKind,
   ProviderInstanceId,
   RunId,
@@ -26,6 +28,10 @@ import { formatSubagentDisplayTitle } from "./subagentDisplay.ts";
 export interface EnvironmentProject extends OrchestrationProjectShell {
   readonly environmentId: EnvironmentId;
   readonly isScratch?: true;
+}
+
+export interface EnvironmentTaskGroupShell extends OrchestrationTaskGroupShell {
+  readonly environmentId: EnvironmentId;
 }
 
 /**
@@ -156,6 +162,7 @@ export interface EnvironmentThreadShell {
   readonly environmentId: EnvironmentId;
   readonly id: ThreadId;
   readonly projectId: ProjectId;
+  readonly taskGroupId?: TaskGroupId | null;
   readonly title: string;
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelSelection: OrchestrationV2ThreadShell["modelSelection"];
@@ -305,6 +312,7 @@ export function presentThreadShell(
     environmentId,
     id: thread.id,
     projectId: thread.projectId,
+    taskGroupId: thread.taskGroupId ?? null,
     title:
       thread.lineage.relationshipToParent === "subagent"
         ? formatSubagentDisplayTitle(thread.title)

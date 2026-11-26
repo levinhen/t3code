@@ -482,6 +482,14 @@ import {
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
+import {
+  TaskGroupCreateInput,
+  TaskGroupUpdateInput,
+  TaskGroupIdInput,
+  TaskGroupResult,
+  TaskGroupActionResult,
+  TaskGroupError,
+} from "./orchestrationTaskGroup.ts";
 
 export const WS_METHODS = {
   projectsListEntries: "projects.listEntries",
@@ -491,6 +499,10 @@ export const WS_METHODS = {
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
   projectsMutate: "projects.mutate",
+  taskGroupCreate: "taskGroup.create",
+  taskGroupUpdate: "taskGroup.update",
+  taskGroupDelete: "taskGroup.delete",
+  taskGroupRegenerateTitle: "taskGroup.regenerateTitle",
   projectsEnsureScratch: "projects.ensureScratch",
   projectsCreateNew: "projects.createNew",
   projectsCreateFromThread: "projects.createFromThread",
@@ -1659,6 +1671,30 @@ const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   error: Schema.Union([ProjectWriteFileError, EnvironmentAuthorizationError]),
 });
 
+const WsTaskGroupCreateRpc = Rpc.make(WS_METHODS.taskGroupCreate, {
+  payload: TaskGroupCreateInput,
+  success: TaskGroupResult,
+  error: Schema.Union([TaskGroupError, EnvironmentAuthorizationError]),
+});
+
+const WsTaskGroupUpdateRpc = Rpc.make(WS_METHODS.taskGroupUpdate, {
+  payload: TaskGroupUpdateInput,
+  success: TaskGroupResult,
+  error: Schema.Union([TaskGroupError, EnvironmentAuthorizationError]),
+});
+
+const WsTaskGroupDeleteRpc = Rpc.make(WS_METHODS.taskGroupDelete, {
+  payload: TaskGroupIdInput,
+  success: TaskGroupActionResult,
+  error: Schema.Union([TaskGroupError, EnvironmentAuthorizationError]),
+});
+
+const WsTaskGroupRegenerateTitleRpc = Rpc.make(WS_METHODS.taskGroupRegenerateTitle, {
+  payload: TaskGroupIdInput,
+  success: TaskGroupActionResult,
+  error: Schema.Union([TaskGroupError, EnvironmentAuthorizationError]),
+});
+
 const WsProjectsMutateRpc = Rpc.make(WS_METHODS.projectsMutate, {
   payload: ProjectMutation,
   success: Project,
@@ -2620,6 +2656,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsCreateFromThreadRpc,
   WsProjectsWriteFileRpc,
   WsProjectsMutateRpc,
+  WsTaskGroupCreateRpc,
+  WsTaskGroupUpdateRpc,
+  WsTaskGroupDeleteRpc,
+  WsTaskGroupRegenerateTitleRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsWorkspaceListFoldersRpc,

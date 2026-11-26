@@ -11,6 +11,7 @@ import {
   OrchestrationDispatchCommandError,
   ProjectId,
   ProviderInstanceId,
+  TaskGroupId,
   ThreadId,
 } from "@t3tools/contracts";
 import { AtomRegistry } from "effect/reactivity";
@@ -1261,7 +1262,7 @@ describe("thread outbox", () => {
     ).toBe("remove");
   });
 
-  it("round-trips queued PR checkout sources and gates incomplete creations from sending", () => {
+  it("round-trips queued PR checkout sources and group membership", () => {
     const base = queuedMessage({
       messageId: "message-1",
       createdAt: "2026-06-08T10:00:01.000Z",
@@ -1274,6 +1275,7 @@ describe("thread outbox", () => {
       },
       creation: {
         projectId: ProjectId.make("project-1"),
+        taskGroupId: TaskGroupId.make("review"),
         workspaceMode: "worktree",
         branch: "fork/feature",
         worktreePath: null,

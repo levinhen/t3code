@@ -1,12 +1,18 @@
-import { ProjectId, ThreadId, type ThreadPullRequestLink } from "@t3tools/contracts";
+import { ProjectId, TaskGroupId, ThreadId, type ThreadPullRequestLink } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { v2Project, v2ShellSnapshot, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
+import {
+  v2Project,
+  v2ShellSnapshot,
+  v2TaskGroup,
+  v2ThreadShell,
+} from "./orchestrationV2TestFixtures.ts";
 import {
   applyShellStreamEvent,
   applyShellStreamEvents,
   type ShellStreamEvent,
   mergeShellSnapshotProjects,
+  reuseUnchangedTaskGroupShells,
   reuseUnchangedThreadShells,
 } from "./shellReducer.ts";
 
@@ -27,6 +33,59 @@ const otherIdentity = {
     remoteUrl: "https://github.com/example/other.git",
   },
 };
+
+describe("task group shell", () => {
+  it("reuses unchanged snapshot rows and accepts a replacement from an older server", () => {
+    const removed = { ...v2TaskGroup, id: TaskGroupId.make("removed") };
+    const previous = { ...v2ShellSnapshot, taskGroups: [v2TaskGroup, removed] };
+    const same = reuseUnchangedTaskGroupShells(previous, {
+      ...v2ShellSnapshot,
+      taskGroups: [{ ...v2TaskGroup }, { ...removed }],
+    });
+    expect(same.taskGroups).toBe(previous.taskGroups);
+
+    const next = reuseUnchangedTaskGroupShells(previous, {
+      ...v2ShellSnapshot,
+      taskGroups: [{ ...v2TaskGroup }],
+    });
+    expect(next.taskGroups).toEqual([v2TaskGroup]);
+    expect(next.taskGroups?.[0]).toBe(v2TaskGroup);
+    expect(reuseUnchangedTaskGroupShells(previous, v2ShellSnapshot)).toBe(v2ShellSnapshot);
+    expect(reuseUnchangedTaskGroupShells(v2ShellSnapshot, next)).toBe(next);
+  });
+
+  it("applies ordered group updates and removals in single and batched delivery", () => {
+    const group = { ...v2TaskGroup, title: "Renamed" };
+    const another = { ...v2TaskGroup, id: TaskGroupId.make("another") };
+    const events: ReadonlyArray<ShellStreamEvent> = [
+      { kind: "task_group.updated", sequence: 1, taskGroup: v2TaskGroup },
+      { kind: "task_group.updated", sequence: 2, taskGroup: another },
+      { kind: "task_group.updated", sequence: 3, taskGroup: group },
+      { kind: "task_group.removed", sequence: 2, taskGroupId: group.id },
+      { kind: "task_group.removed", sequence: 4, taskGroupId: another.id },
+    ];
+    const single = events.reduce(applyShellStreamEvent, v2ShellSnapshot);
+    const batched = applyShellStreamEvents(v2ShellSnapshot, events);
+    expect(single).toEqual(batched);
+    expect(batched.taskGroups).toEqual([group]);
+    expect(batched.threads).toBe(v2ShellSnapshot.threads);
+
+    const equivalent: ShellStreamEvent = {
+      kind: "task_group.updated",
+      sequence: 5,
+      taskGroup: { ...group },
+    };
+    const missingRemoval: ShellStreamEvent = {
+      kind: "task_group.removed",
+      sequence: 6,
+      taskGroupId: another.id,
+    };
+    expect(applyShellStreamEvent(single, equivalent).taskGroups).toBe(single.taskGroups);
+    const unchanged = applyShellStreamEvents(batched, [equivalent, missingRemoval]);
+    expect(unchanged.snapshotSequence).toBe(6);
+    expect(unchanged.taskGroups).toBe(batched.taskGroups);
+  });
+});
 
 describe("applyShellStreamEvent", () => {
   it("ignores stale project updates without mutating the snapshot", () => {

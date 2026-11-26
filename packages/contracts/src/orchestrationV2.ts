@@ -35,6 +35,7 @@ import {
   PlanId,
   PositiveInt,
   ProjectId,
+  TaskGroupId,
   ProviderSessionId,
   ProviderThreadId,
   ProviderTurnId,
@@ -87,6 +88,7 @@ import {
 } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
+import { OrchestrationTaskGroupShell } from "./orchestrationTaskGroup.ts";
 import { PROJECT_TRACKED_FOLDERS_MAX } from "./project.ts";
 import {
   TurnTokenUsage,
@@ -569,6 +571,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   sidebarParent: Schema.optional(Schema.NullOr(ThreadSidebarParent)),
+  taskGroupId: Schema.optionalKey(Schema.NullOr(TaskGroupId)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
@@ -2218,6 +2221,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.pin-reordered",
       "thread.active-reordered",
       "thread.sidebar-parent-updated",
+      "thread.task-group.updated",
       "thread.tags-updated",
       "thread.visited",
       "thread.marked-unread",
@@ -2490,6 +2494,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   sidebarParent: Schema.optional(Schema.NullOr(ThreadSidebarParent)),
+  taskGroupId: Schema.optionalKey(Schema.NullOr(TaskGroupId)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
   lastVisitedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
@@ -2541,12 +2546,13 @@ export function isLiveSubagentShell(
 export function isOlderSettledThreadShell(
   thread: Pick<
     OrchestrationV2ThreadShell,
-    "lineage" | "settledOverride" | "settledAt" | "sidebarParent"
+    "lineage" | "settledOverride" | "settledAt" | "sidebarParent" | "taskGroupId"
   >,
   beforeMs: number,
 ): boolean {
   return (
     thread.sidebarParent == null &&
+    thread.taskGroupId == null &&
     isListedThreadLineage(thread.lineage) &&
     thread.settledOverride === "settled" &&
     thread.settledAt !== null &&
@@ -2592,6 +2598,7 @@ export type OrchestrationV2IdleSubagents = typeof OrchestrationV2IdleSubagents.T
 export const OrchestrationV2ShellSnapshot = Schema.Struct({
   ...OrchestrationV2ThreadShellSnapshot.fields,
   projects: Schema.Array(OrchestrationProjectShell),
+  taskGroups: Schema.optionalKey(Schema.Array(OrchestrationTaskGroupShell)),
   olderSettled: Schema.optionalKey(OrchestrationV2OlderSettledThreads),
   idleSubagents: Schema.optionalKey(Schema.Array(OrchestrationV2IdleSubagents)),
 });
@@ -2638,6 +2645,16 @@ export const OrchestrationV2ShellStreamItem = Schema.Union([
     kind: Schema.Literal("project.removed"),
     sequence: NonNegativeInt,
     projectId: ProjectId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("task_group.updated"),
+    sequence: NonNegativeInt,
+    taskGroup: OrchestrationTaskGroupShell,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("task_group.removed"),
+    sequence: NonNegativeInt,
+    taskGroupId: TaskGroupId,
   }),
   Schema.Struct({
     kind: Schema.Literal("thread.updated"),
@@ -3194,6 +3211,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.pin-reordered",
       "thread.active-reordered",
       "thread.sidebar-parent-updated",
+      "thread.task-group.updated",
       "thread.tags-updated",
       "thread.visited",
       "thread.marked-unread",
@@ -3346,6 +3364,7 @@ export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.create"),
     ...OrchestrationV2CreationFields,
+    taskGroupId: Schema.optionalKey(Schema.NullOr(TaskGroupId)),
     commandId: CommandId,
     threadId: ThreadId,
     projectId: ProjectId,
@@ -3423,6 +3442,13 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     expectedLatestRunId: Schema.optional(RunId),
+    // Group restoration or reassignment cancels settlement requested by the archive.
+    expectedArchivedTaskGroup: Schema.optionalKey(
+      Schema.Struct({
+        taskGroupId: TaskGroupId,
+        archivedAt: IsoDateTime,
+      }),
+    ),
     settledAt: Schema.optional(Schema.DateTimeUtc),
   }),
   /** Rejects changes since snapshotAt or any explicit settled override to preserve user actions. */
@@ -3488,6 +3514,12 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     parent: ThreadSidebarParent,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.taskGroup.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    taskGroupId: Schema.NullOr(TaskGroupId),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.active.reorder"),
@@ -4202,6 +4234,7 @@ export const OrchestrationV2ArchivedShellSnapshot = Schema.Struct({
 export type OrchestrationV2ArchivedShellSnapshot = typeof OrchestrationV2ArchivedShellSnapshot.Type;
 
 export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
+  taskGroupId: Schema.optionalKey(Schema.NullOr(TaskGroupId)),
   commandId: CommandId,
   creationSource: Schema.optional(OrchestrationV2CreationSource),
   threadId: Schema.optional(ThreadId),

@@ -82,6 +82,7 @@ import {
   CheckpointId,
   EnvironmentId,
   ThreadId,
+  TaskGroupId,
   TurnItemId,
   NodeId,
   ProjectId,
@@ -508,6 +509,7 @@ export interface ShellSnapshotOptions {
 export interface ActiveShellIndexEntry extends Pick<
   OrchestrationV2ThreadShell,
   | "sidebarParent"
+  | "taskGroupId"
   | "id"
   | "projectId"
   | "lineage"
@@ -1079,6 +1081,7 @@ export function applyToProjection(
       };
     // Reordering and PR refreshes preserve the orchestrator's activity timestamp.
     case "thread.sidebar-parent-updated":
+    case "thread.task-group.updated":
     case "thread.active-reordered":
     case "thread.tags-updated":
     case "thread.pull-request-synced":
@@ -1957,6 +1960,9 @@ export function threadShellFromProjection(
     ...(projection.thread.sidebarParent === undefined
       ? {}
       : { sidebarParent: projection.thread.sidebarParent }),
+    ...(projection.thread.taskGroupId === undefined
+      ? {}
+      : { taskGroupId: projection.thread.taskGroupId }),
     lineage: projection.thread.lineage,
     forkedFrom: projection.thread.forkedFrom,
     activeProviderThreadId: projection.thread.activeProviderThreadId,
@@ -2277,6 +2283,9 @@ function shellFromState(input: {
     ...(input.state.thread.sidebarParent === undefined
       ? {}
       : { sidebarParent: input.state.thread.sidebarParent }),
+    ...(input.state.thread.taskGroupId === undefined
+      ? {}
+      : { taskGroupId: input.state.thread.taskGroupId }),
     lineage: input.state.thread.lineage,
     forkedFrom: input.state.thread.forkedFrom,
     activeProviderThreadId: input.state.thread.activeProviderThreadId,
@@ -2522,6 +2531,22 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               });
               break;
             }
+            case "thread.task-group.updated": {
+              const thread = yield* getThread(event.threadId);
+              const payloadJson = yield* encodeThreadPayload({
+                ...thread,
+                taskGroupId: event.payload.taskGroupId ?? null,
+                ...(event.payload.sidebarParent === undefined
+                  ? {}
+                  : { sidebarParent: event.payload.sidebarParent }),
+              });
+              yield* sql`
+                UPDATE orchestration_v2_projection_threads
+                SET payload_json = ${payloadJson}
+                WHERE thread_id = ${event.threadId} AND deleted_at IS NULL
+              `;
+              break;
+            }
             case "thread.created":
             case "thread.archived":
             case "thread.unarchived":
@@ -2549,6 +2574,22 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.guest-share-updated": {
               const payloadJson = yield* encodeThreadPayload(event.payload);
               const payload = parseEncodedPayload(payloadJson);
+              // A bulk task-group move can commit after a thread command has read its payload.
+              const withMembership = sql`CASE
+                WHEN json_extract(payload_json, '$.taskGroupId')
+                  IS NOT json_extract(excluded.payload_json, '$.taskGroupId')
+                THEN json_set(excluded.payload_json, '$.taskGroupId', json_extract(payload_json, '$.taskGroupId'))
+                ELSE excluded.payload_json
+              END`;
+              const withSidebarParent =
+                event.type === "thread.sidebar-parent-updated"
+                  ? withMembership
+                  : sql`CASE
+                      WHEN json_extract(payload_json, '$.sidebarParent')
+                        IS NOT json_extract(excluded.payload_json, '$.sidebarParent')
+                      THEN json_set(${withMembership}, '$.sidebarParent', json_extract(payload_json, '$.sidebarParent'))
+                      ELSE ${withMembership}
+                    END`;
               yield* sql`
               INSERT INTO orchestration_v2_projection_threads (
                 thread_id,
@@ -2593,7 +2634,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 updated_at = excluded.updated_at,
                 archived_at = excluded.archived_at,
                 deleted_at = excluded.deleted_at,
-                payload_json = excluded.payload_json
+                payload_json = ${withSidebarParent}
             `;
               break;
             }
@@ -3390,6 +3431,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             event.type !== "thread.pin-reordered" &&
             event.type !== "thread.active-reordered" &&
             event.type !== "thread.sidebar-parent-updated" &&
+            event.type !== "thread.task-group.updated" &&
             event.type !== "thread.tags-updated" &&
             event.type !== "thread.visited" &&
             event.type !== "thread.visit-recorded" &&
@@ -9575,6 +9617,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly provider_instance_id: string | null;
         readonly sidebar_parent_kind: string | null;
         readonly sidebar_parent_id: string | null;
+        readonly task_group_id: string | null;
         readonly may_be_live: number;
         readonly has_remote_tasks: number;
       }>`
@@ -9592,6 +9635,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           ${indexedField("$.snoozedUntil")} AS snoozed_until,
           ${indexedField("$.sidebarParent.kind")} AS sidebar_parent_kind,
           ${indexedField("$.sidebarParent.threadId")} AS sidebar_parent_id,
+          ${indexedField("$.taskGroupId")} AS task_group_id,
           -- Only a subagent reads its payload, as a pull request link does below: a snapshot can
           -- leave it out and still name its provider.
           CASE WHEN ${indexedField("$.lineage.relationshipToParent")} = 'subagent'
@@ -9655,6 +9699,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         ...(row.provider_instance_id === null
           ? {}
           : { providerInstanceId: ProviderInstanceId.make(row.provider_instance_id) }),
+        taskGroupId: row.task_group_id === null ? null : TaskGroupId.make(row.task_group_id),
         sidebarParent:
           row.sidebar_parent_kind === "top_level"
             ? { kind: "top_level" }
@@ -9795,6 +9840,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         WHERE t.deleted_at IS NULL
           AND t.archived_at IS NULL
           AND json_extract(t.payload_json, '$.sidebarParent.kind') IS NULL
+          AND json_extract(t.payload_json, '$.taskGroupId') IS NULL
           AND json_extract(t.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
           AND json_extract(t.payload_json, '$.lineage.sideChat') IS NOT 1
           AND json_extract(t.payload_json, '$.settledOverride') = 'settled'

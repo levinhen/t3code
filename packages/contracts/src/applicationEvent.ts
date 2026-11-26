@@ -9,10 +9,12 @@ import {
   NonNegativeInt,
   ProjectId,
   ProviderItemId,
+  TaskGroupId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { OrchestrationTaskGroupShell } from "./orchestrationTaskGroup.ts";
 import type { OrchestrationV2StoredEvent } from "./orchestrationV2.ts";
 import { ProjectScript, ProjectTrackedFolders, StoredProjectIcon } from "./project.ts";
 
@@ -114,4 +116,32 @@ export const ApplicationProjectEvent = Schema.Union([
 ]);
 export type ApplicationProjectEvent = typeof ApplicationProjectEvent.Type;
 
-export type ApplicationStoredEvent = ApplicationProjectEvent | OrchestrationV2StoredEvent;
+const ApplicationTaskGroupEventBaseFields = {
+  ...ApplicationProjectEventBaseFields,
+  aggregateKind: Schema.Literal("task_group"),
+  aggregateId: TaskGroupId,
+} as const;
+
+export const ApplicationTaskGroupEvent = Schema.Union([
+  Schema.Struct({
+    ...ApplicationTaskGroupEventBaseFields,
+    type: Schema.Literal("task_group.created"),
+    payload: OrchestrationTaskGroupShell,
+  }),
+  Schema.Struct({
+    ...ApplicationTaskGroupEventBaseFields,
+    type: Schema.Literal("task_group.updated"),
+    payload: OrchestrationTaskGroupShell,
+  }),
+  Schema.Struct({
+    ...ApplicationTaskGroupEventBaseFields,
+    type: Schema.Literal("task_group.deleted"),
+    payload: Schema.Struct({ taskGroupId: TaskGroupId, deletedAt: IsoDateTime }),
+  }),
+]);
+export type ApplicationTaskGroupEvent = typeof ApplicationTaskGroupEvent.Type;
+
+export type ApplicationStoredEvent =
+  | ApplicationProjectEvent
+  | ApplicationTaskGroupEvent
+  | OrchestrationV2StoredEvent;

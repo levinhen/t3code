@@ -4,6 +4,7 @@ import {
   type OrchestrationProjectShell,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -33,6 +34,7 @@ import {
 } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as TaskGroupStore from "./TaskGroupStore.ts";
 import {
   loadShellUnlessResumable,
   loadSubscriberShellSnapshot,
@@ -65,6 +67,7 @@ export const layer = HttpApiBuilder.group(
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
     const projectStore = yield* ProjectStore.ProjectStoreV2;
+    const taskGroups = yield* TaskGroupStore.TaskGroupStore;
     const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
 
     const enrichProjectShells = Effect.fn("http.orchestration.enrichProjectShells")(
@@ -97,6 +100,7 @@ export const layer = HttpApiBuilder.group(
               ...(threadIds === undefined ? {} : { threadIds }),
             }),
           listProjects: projectStore.listShells(),
+          listTaskGroups: taskGroups.listShells(),
           latestSequence: applicationEvents.latestApplicationSequence,
           options,
         });
@@ -317,4 +321,4 @@ export const layer = HttpApiBuilder.group(
         }),
       );
   }),
-);
+).pipe(Layer.provide(TaskGroupStore.layer));

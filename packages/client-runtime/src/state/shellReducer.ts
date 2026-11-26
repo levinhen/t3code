@@ -1,5 +1,6 @@
 import {
   OrchestrationProjectShell,
+  OrchestrationTaskGroupShell,
   OrchestrationV2ThreadShell,
   RepositoryIdentity,
   ThreadPullRequestLink,
@@ -8,9 +9,12 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import { arrayElementsEqual } from "./entities.ts";
 
 const sameThreadShell = Schema.toEquivalence(OrchestrationV2ThreadShell);
 const sameProjectShell = Schema.toEquivalence(OrchestrationProjectShell);
+const sameTaskGroupShell = Schema.toEquivalence(OrchestrationTaskGroupShell);
+const EMPTY_TASK_GROUPS: ReadonlyArray<OrchestrationTaskGroupShell> = [];
 const sameLinks = Schema.toEquivalence(Schema.UndefinedOr(Schema.Array(ThreadPullRequestLink)));
 const sameRepositoryIdentity = Schema.toEquivalence(
   Schema.UndefinedOr(Schema.NullOr(RepositoryIdentity)),
@@ -46,6 +50,21 @@ export function reuseUnchangedThreadShells(
     return retained;
   });
   return changed ? { ...next, threads } : next;
+}
+
+export function reuseUnchangedTaskGroupShells(
+  previous: OrchestrationV2ShellSnapshot | null,
+  next: OrchestrationV2ShellSnapshot,
+): OrchestrationV2ShellSnapshot {
+  const previousGroups = previous?.taskGroups;
+  if (previousGroups === undefined || next.taskGroups === undefined) return next;
+  const previousById = new Map(previousGroups.map((group) => [group.id, group] as const));
+  const groups = next.taskGroups.map((group) => {
+    const prior = previousById.get(group.id);
+    return prior !== undefined && sameTaskGroupShell(prior, group) ? prior : group;
+  });
+  const taskGroups = arrayElementsEqual(previousGroups, groups) ? previousGroups : groups;
+  return taskGroups === next.taskGroups ? next : { ...next, taskGroups };
 }
 
 function upsertById<T extends { readonly id: unknown }>(
@@ -156,6 +175,27 @@ export function applyShellStreamEvent(
         projects: snapshot.projects.filter((project) => project.id !== event.projectId),
         snapshotSequence: event.sequence,
       };
+    case "task_group.updated": {
+      const groups = snapshot.taskGroups ?? EMPTY_TASK_GROUPS;
+      const previous = groups.find((group) => group.id === event.taskGroup.id);
+      return previous !== undefined && sameTaskGroupShell(previous, event.taskGroup)
+        ? { ...snapshot, snapshotSequence: event.sequence }
+        : {
+            ...snapshot,
+            taskGroups: upsertById(groups, event.taskGroup),
+            snapshotSequence: event.sequence,
+          };
+    }
+    case "task_group.removed": {
+      const groups = snapshot.taskGroups;
+      return groups?.some((group) => group.id === event.taskGroupId)
+        ? {
+            ...snapshot,
+            taskGroups: groups.filter((group) => group.id !== event.taskGroupId),
+            snapshotSequence: event.sequence,
+          }
+        : { ...snapshot, snapshotSequence: event.sequence };
+    }
     case "thread.updated": {
       const existing =
         event.location === "active"
@@ -254,6 +294,7 @@ export function applyShellStreamEvents(
   // Avoid indexing the whole shell for the common single-event delivery.
   if (events.length === 1) return applyShellStreamEvent(snapshot, events[0]!);
   const projects = batchRows(snapshot.projects);
+  const taskGroups = batchRows(snapshot.taskGroups ?? EMPTY_TASK_GROUPS);
   const threads = batchRows(snapshot.threads);
   const archivedThreads = batchRows(snapshot.archivedThreads);
   let sequence = snapshot.snapshotSequence;
@@ -266,6 +307,16 @@ export function applyShellStreamEvents(
         break;
       case "project.removed":
         projects.remove(event.projectId);
+        break;
+      case "task_group.updated": {
+        const previous = taskGroups.get(event.taskGroup.id);
+        if (previous === undefined || !sameTaskGroupShell(previous, event.taskGroup)) {
+          taskGroups.set(event.taskGroup);
+        }
+        break;
+      }
+      case "task_group.removed":
+        taskGroups.remove(event.taskGroupId);
         break;
       case "thread.updated": {
         const id = event.thread.id;
@@ -292,11 +343,13 @@ export function applyShellStreamEvents(
     sequence = event.sequence;
   }
   if (sequence === snapshot.snapshotSequence) return snapshot;
+  const groups = taskGroups.finish();
   return withoutRemovedIdleSubagents(
     {
       ...snapshot,
       snapshotSequence: sequence,
       projects: projects.finish(),
+      ...(groups === (snapshot.taskGroups ?? EMPTY_TASK_GROUPS) ? {} : { taskGroups: groups }),
       threads: threads.finish(),
       archivedThreads: archivedThreads.finish(),
     },

@@ -515,6 +515,10 @@ export interface ThreadManagementServiceShape {
     readonly projectId: ProjectId;
     readonly threadId: ThreadId;
     readonly runId: RunId;
+    readonly expectedArchivedTaskGroup?: Extract<
+      OrchestrationV2Command,
+      { type: "thread.settle" }
+    >["expectedArchivedTaskGroup"];
   }) => Effect.Effect<void, ThreadManagementFailure>;
   readonly settleThread: (input: {
     readonly threadId: ThreadId;
@@ -1253,6 +1257,8 @@ const make = Effect.gen(function* () {
     const trySettle = Effect.gen(function* () {
       const sequence = yield* orchestrator.getThreadEventSequence(input.threadId);
       const records = yield* getProjectThreadRecords(input, ["runs"]);
+      const group = input.expectedArchivedTaskGroup;
+      if (group !== undefined && records.thread.taskGroupId !== group.taskGroupId) return true;
       // Settling ends every watch; one the agent started after asking to settle must outlive it.
       if (
         threadPullRequestsOf(records.thread).some(
@@ -1322,9 +1328,14 @@ const make = Effect.gen(function* () {
       if (latest === undefined) return true;
       return yield* dispatch({
         type: "thread.settle",
-        commandId: CommandId.make(`server:settle-after-run:${input.runId}:${sequence}`),
+        commandId: CommandId.make(
+          group === undefined
+            ? `server:settle-after-run:${input.runId}:${sequence}`
+            : `server:task-group-settle-after-run:${group.taskGroupId}:${group.archivedAt}:${input.runId}:${sequence}`,
+        ),
         threadId: input.threadId,
         expectedLatestRunId: latest.id,
+        ...(group === undefined ? {} : { expectedArchivedTaskGroup: group }),
       }).pipe(
         Effect.as(true),
         // A notification can start between the projection read and the guarded dispatch.

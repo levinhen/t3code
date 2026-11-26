@@ -5,6 +5,7 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  TaskGroupId,
   ThreadId,
 } from "@t3tools/contracts";
 import { attachmentUploadError } from "@t3tools/client-runtime/state/attachment-uploads";
@@ -261,12 +262,14 @@ beforeEach(() => {
 });
 
 describe("queued PR checkout", () => {
+  const taskGroupId = TaskGroupId.make("ready-for-review");
   const queuedPullRequest = () =>
     message({
       threadId: ThreadId.make("new-pr-thread"),
       modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
       creation: {
         projectId: ProjectId.make("project"),
+        taskGroupId,
         projectCwd: "/repo",
         workspaceMode: "worktree",
         branch: "fork/feature",
@@ -280,7 +283,7 @@ describe("queued PR checkout", () => {
     isOnPullRequestHead: true,
   };
 
-  it("waits for the provider's PR checkout and launches in that worktree", async () => {
+  it("waits for the provider's PR checkout and launches in that worktree and group", async () => {
     setOperateGrant("secondary", true);
     await state.manager.enqueue(queuedPullRequest());
     const started = Promise.withResolvers<void>();
@@ -303,6 +306,7 @@ describe("queued PR checkout", () => {
     const bootstrap = state.start.mock.calls[0]?.[0].input.bootstrap;
     expect(bootstrap.createThread).toMatchObject({
       branch: "pr-123",
+      taskGroupId,
       worktreePath: preparedCheckout.worktreePath,
     });
     expect(bootstrap.prepareWorktree).toBeUndefined();

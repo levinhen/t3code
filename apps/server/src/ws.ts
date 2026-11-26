@@ -182,6 +182,8 @@ import {
 } from "./orchestration-v2/WireProjection.ts";
 import { dedupeSnapshotBodies } from "@t3tools/shared/orchestrationV2DedupedBodies";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
+import * as TaskGroupStore from "./orchestration-v2/TaskGroupStore.ts";
+import * as TaskGroupService from "./orchestration-v2/TaskGroupService.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import { userFacingDispatchErrorMessage } from "./orchestration-v2/UserFacingErrors.ts";
@@ -1170,6 +1172,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
     const projects = yield* ProjectStore.ProjectStoreV2;
+    const taskGroups = yield* TaskGroupStore.TaskGroupStore;
     const projectService = yield* ProjectService.ProjectService;
     const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
     let subagentThreadIds = new Set<string>();
@@ -1202,6 +1205,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
             ...(threadIds === undefined ? {} : { threadIds }),
           }),
         listProjects: projects.listShells(),
+        listTaskGroups: taskGroups.listShells(),
         latestSequence: applicationEvents.latestApplicationSequence,
         options: {
           omitIdleSubagents: input.omitIdleSubagents === true,
@@ -1270,7 +1274,15 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
         (stored) =>
           Effect.gen(function* () {
             if ("aggregateKind" in stored) {
-              return yield* projectItem(stored);
+              if (stored.aggregateKind === "project") return yield* projectItem(stored);
+              const { sequence, aggregateId: taskGroupId } = stored;
+              const group =
+                stored.type === "task_group.deleted"
+                  ? Option.none()
+                  : yield* taskGroups.getShell(taskGroupId);
+              return Option.isSome(group)
+                ? { kind: "task_group.updated" as const, sequence, taskGroup: group.value }
+                : { kind: "task_group.removed" as const, sequence, taskGroupId };
             }
             const threadId = stored.event.threadId;
             const shell =
@@ -1446,6 +1458,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       ),
     );
   },
+  Effect.provide(TaskGroupStore.layer),
 );
 
 export const layerWsRpc = (
@@ -1470,6 +1483,7 @@ export const layerWsRpc = (
       >();
       const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
       const projectStore = yield* ProjectStore.ProjectStoreV2;
+      const taskGroupService = yield* TaskGroupService.TaskGroupService;
       const projectService = yield* ProjectService.ProjectService;
       const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
       const scratchThreadPromotion = yield* ScratchThreadPromotion.ScratchThreadPromotion;
@@ -2249,6 +2263,9 @@ export const layerWsRpc = (
                             : { reuseExistingThread: input.reuseExistingThread }),
                           projectId: input.projectId,
                           title: input.title,
+                          ...(input.taskGroupId === undefined
+                            ? {}
+                            : { taskGroupId: input.taskGroupId }),
                           ...(input.generateTitle === undefined
                             ? {}
                             : { generateTitle: input.generateTitle }),
@@ -3131,6 +3148,10 @@ export const layerWsRpc = (
                 }),
             ),
           ),
+        [WS_METHODS.taskGroupCreate]: taskGroupService.create,
+        [WS_METHODS.taskGroupUpdate]: taskGroupService.update,
+        [WS_METHODS.taskGroupDelete]: taskGroupService.remove,
+        [WS_METHODS.taskGroupRegenerateTitle]: taskGroupService.regenerateTitle,
         [WS_METHODS.projectsMutate]: (mutation) =>
           startup.enqueueCommand(mutateProject(mutation)).pipe(
             Effect.mapError(

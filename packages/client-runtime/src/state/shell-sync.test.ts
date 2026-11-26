@@ -32,7 +32,12 @@ import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import { type EnvironmentShellState, makeEnvironmentShellState } from "./shell.ts";
 import * as ShellSnapshotLoader from "./shellSnapshotHttp.ts";
-import { v2Project, v2ShellSnapshot, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
+import {
+  v2Project,
+  v2ShellSnapshot,
+  v2TaskGroup,
+  v2ThreadShell,
+} from "./orchestrationV2TestFixtures.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -349,6 +354,12 @@ describe("environment shell synchronization", () => {
             (yield* SubscriptionRef.get(saved)).map((snapshot) => snapshot.snapshotSequence),
           ).toEqual([1]);
           yield* h.send(
+            { kind: "task_group.updated", sequence: 11, taskGroup: v2TaskGroup },
+            (snapshot) => snapshot.snapshotSequence === 11,
+          );
+          yield* TestClock.adjust("10 seconds");
+          expect((yield* SubscriptionRef.get(saved)).at(-1)?.taskGroups).toEqual([v2TaskGroup]);
+          yield* h.send(
             { kind: "snapshot", snapshot: { ...LIVE_SHELL_SNAPSHOT, snapshotSequence: 4 } },
             (snapshot) => snapshot.snapshotSequence === 4,
           );
@@ -373,6 +384,7 @@ describe("environment shell synchronization", () => {
         ]),
       ).toEqual([
         [1, v2Project.title],
+        [11, v2Project.title],
         [4, v2Project.title],
         [4, "Changed at same sequence"],
       ]);
@@ -1153,12 +1165,13 @@ describe("environment shell cold start", () => {
   const CACHED_SEQUENCE = 7;
   const HTTP_SEQUENCE = 9;
   // What `session()` advertises: server 1.0.0, no omissions, no migration.
-  const CURRENT_ORIGIN = {
+  const LEGACY_ORIGIN = {
     serverVersion: "1.0.0",
     databaseMigration: null,
     omitIdleSubagents: false,
     omitOlderSettled: false,
   };
+  const CURRENT_ORIGIN = { ...LEGACY_ORIGIN, tracksTaskGroups: true as const };
   const RECENT_ORIGIN = { ...CURRENT_ORIGIN, snapshotAt: NOW - HOUR };
 
   // A server that names its shell flags in the descriptor, and the matching live config.
@@ -1328,6 +1341,11 @@ describe("environment shell cold start", () => {
   it.effect.each([
     { label: "a recent matching origin", origin: RECENT_ORIGIN, resumes: true },
     { label: "no origin", origin: undefined, resumes: false },
+    {
+      label: "an origin from before the client tracked task groups",
+      origin: { ...LEGACY_ORIGIN, snapshotAt: RECENT_ORIGIN.snapshotAt },
+      resumes: false,
+    },
     {
       label: "other omissions",
       origin: { ...RECENT_ORIGIN, omitIdleSubagents: true },

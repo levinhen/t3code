@@ -23,6 +23,7 @@ import {
   type GitCommandError,
   type GitManagerServiceError,
   TaskFolderError,
+  type TaskGroupId,
   TextGenerationError,
   ThreadId,
 } from "@t3tools/contracts";
@@ -98,6 +99,7 @@ export interface ThreadLaunchInitialMessage {
 }
 
 export interface ThreadLaunchInput {
+  readonly taskGroupId?: TaskGroupId | null;
   readonly commandId: CommandId;
   readonly threadId?: ThreadId;
   readonly reuseExistingThread?: boolean;
@@ -1485,6 +1487,7 @@ const make = Effect.gen(function* () {
                 commandId: input.commandId,
                 threadId: candidateThreadId,
                 projectId: input.projectId,
+                ...(input.taskGroupId === undefined ? {} : { taskGroupId: input.taskGroupId }),
                 title: input.title,
                 ...(input.titleRenamed === true ? { titleRenamed: true } : {}),
                 modelSelection: input.modelSelection,

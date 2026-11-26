@@ -13,6 +13,7 @@ import {
   ProviderThreadId,
   ProviderTurnId,
   RunId,
+  TaskGroupId,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -107,6 +108,29 @@ const emptyProjection = {
 } as OrchestrationV2ThreadProjection;
 
 describe("applyOrchestrationV2ProjectionEvent", () => {
+  it("applies a task group move and its normalized sidebar parent to thread detail", () => {
+    const projection = {
+      ...emptyProjection,
+      thread: {
+        ...emptyProjection.thread,
+        sidebarParent: { kind: "thread" as const, threadId: ThreadId.make("old-parent") },
+      },
+    };
+    const payload = {
+      ...projection.thread,
+      taskGroupId: TaskGroupId.make("task-group"),
+      sidebarParent: { kind: "top_level" as const },
+    };
+    const next = applyOrchestrationV2ProjectionEvent(projection, {
+      id: "task-group-update" as OrchestrationV2DomainEvent["id"],
+      type: "thread.task-group.updated",
+      threadId,
+      occurredAt: now,
+      payload,
+    });
+    expect(next?.thread).toEqual(payload);
+  });
+
   it("applies a compact PR sync without replacing other links or thread metadata", () => {
     const link = (number: number): ThreadPullRequestLink => ({
       host: "github.com",

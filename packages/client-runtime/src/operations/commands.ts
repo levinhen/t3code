@@ -27,6 +27,7 @@ import {
   type RunId,
   type RuntimeMode,
   type RuntimeRequestId,
+  type TaskGroupId,
   type ThreadId,
   type ThreadEnvMode,
   type UploadChatAttachment,
@@ -94,6 +95,7 @@ export interface DeleteProjectInput extends CommandMetadata {
 export interface CreateThreadInput extends CommandMetadata {
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
+  readonly taskGroupId?: TaskGroupId | null;
   readonly title: string;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
@@ -171,6 +173,7 @@ export interface SetThreadInteractionModeInput extends ThreadCommandInput {
 interface StartThreadBootstrap {
   readonly createThread?: {
     readonly projectId: ProjectId;
+    readonly taskGroupId?: TaskGroupId | null;
     readonly title: string;
     readonly modelSelection: ModelSelection;
     readonly runtimeMode: RuntimeMode;
@@ -509,6 +512,7 @@ export const createThread = Effect.fn("EnvironmentCommands.createThread")(functi
     creationSource: input.creationSource ?? "web",
     threadId: input.threadId,
     projectId: input.projectId,
+    ...(input.taskGroupId === undefined ? {} : { taskGroupId: input.taskGroupId }),
     title: input.title,
     modelSelection: input.modelSelection,
     runtimeMode: input.runtimeMode,
@@ -649,6 +653,17 @@ export const setThreadSidebarParent = Effect.fn("EnvironmentCommands.setThreadSi
     });
   },
 );
+
+export const setThreadTaskGroup = Effect.fn("EnvironmentCommands.setThreadTaskGroup")(function* (
+  input: ThreadCommandInput & { readonly taskGroupId: TaskGroupId | null },
+) {
+  return yield* dispatch({
+    type: "thread.taskGroup.set",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    taskGroupId: input.taskGroupId,
+  });
+});
 
 export const reorderActiveThread = Effect.fn("EnvironmentCommands.reorderActiveThread")(function* (
   input: ReorderActiveThreadInput,
@@ -843,6 +858,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       threadId: input.threadId,
       ...(bootstrap === undefined ? { reuseExistingThread: true } : {}),
       projectId: thread.projectId,
+      ...(bootstrap?.taskGroupId === undefined ? {} : { taskGroupId: bootstrap.taskGroupId }),
       title: input.titleSeed ?? thread.title,
       generateTitle: input.titleSeed !== undefined,
       modelSelection: input.modelSelection ?? thread.modelSelection,

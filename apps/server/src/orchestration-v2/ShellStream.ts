@@ -1,6 +1,7 @@
 import type {
   ApplicationStoredEvent,
   OrchestrationProjectShell,
+  OrchestrationTaskGroupShell,
   OrchestrationV2IdleSubagents,
   OrchestrationV2OlderSettledCount,
   OrchestrationV2OlderSettledThreads,
@@ -156,6 +157,10 @@ export const bufferShellLiveStream = <E, R>(
           return `project:${item.project.id}`;
         case "project.removed":
           return `project:${item.projectId}`;
+        case "task_group.updated":
+          return `task_group:${item.taskGroup.id}`;
+        case "task_group.removed":
+          return `task_group:${item.taskGroupId}`;
         case "thread.updated":
           return `thread:${item.location}:${item.thread.id}`;
         case "thread.removed":
@@ -167,6 +172,7 @@ export const bufferShellLiveStream = <E, R>(
 
 function buildActiveShellSnapshot(input: {
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
+  readonly taskGroups: ReadonlyArray<OrchestrationTaskGroupShell>;
   readonly threads: OrchestrationV2ThreadShellSnapshot;
   readonly snapshotSequence: number;
 }): OrchestrationV2ShellSnapshot {
@@ -174,6 +180,7 @@ function buildActiveShellSnapshot(input: {
     schemaVersion: input.threads.schemaVersion,
     snapshotSequence: input.snapshotSequence,
     projects: input.projects,
+    taskGroups: input.taskGroups,
     threads: input.threads.threads,
     archivedThreads: [],
   };
@@ -181,7 +188,7 @@ function buildActiveShellSnapshot(input: {
 
 type ShellTrimRow = Pick<
   OrchestrationV2ThreadShell,
-  "id" | "projectId" | "lineage" | "settledOverride" | "settledAt" | "sidebarParent"
+  "id" | "projectId" | "lineage" | "settledOverride" | "settledAt" | "sidebarParent" | "taskGroupId"
 > & { readonly hasRemoteTasks?: boolean; readonly providerInstanceId?: ProviderInstanceId };
 
 /**
@@ -212,7 +219,7 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
   for (const row of rows) {
     if (row.hasRemoteTasks === true) remoteTaskParentIds.add(row.id);
     if (row.sidebarParent?.kind === "thread") subagentParentIds.add(row.sidebarParent.threadId);
-    if (row.sidebarParent != null) continue;
+    if (row.sidebarParent != null || row.taskGroupId != null) continue;
     if (row.lineage.relationshipToParent === "subagent") {
       subagentThreadIds.add(row.id);
       if (row.lineage.parentThreadId) {
@@ -273,6 +280,7 @@ function omitIdleSubagentShellsWith(
 ): ReadonlyArray<OrchestrationV2ThreadShell> {
   return threads.filter(
     (thread) =>
+      thread.taskGroupId != null ||
       thread.sidebarParent != null ||
       thread.lineage.relationshipToParent !== "subagent" ||
       isLiveSubagentShell(thread) ||
@@ -429,7 +437,8 @@ function shellSubscriberThreadIds(
   const subagents = index.filter(
     (entry) =>
       entry.lineage.relationshipToParent === "subagent" &&
-      (entry.sidebarParent != null ||
+      (entry.taskGroupId != null ||
+        entry.sidebarParent != null ||
         !options.omitIdleSubagents ||
         entry.mayBeLive ||
         entry.hasRemoteTasks ||
@@ -465,13 +474,14 @@ function shellSubscriberThreadIds(
  * store's index decides which shells to read, so threads the trims drop are never built.
  */
 export const loadSubscriberShellSnapshot = Effect.fn("ShellStream.loadSubscriberShellSnapshot")(
-  function* <E1, E2, E3, E4, E5>(input: {
+  function* <E1, E2, E3, E4, E5, E6>(input: {
     readonly sql: SqlClient.SqlClient;
     readonly listShellIndex: Effect.Effect<ReadonlyArray<ActiveShellIndexEntry>, E1>;
     readonly readThreads: (
       threadIds: ReadonlyArray<ThreadId> | undefined,
     ) => Effect.Effect<Effect.Effect<OrchestrationV2ThreadShellSnapshot, E3>, E2>;
     readonly listProjects: Effect.Effect<ReadonlyArray<OrchestrationProjectShell>, E4>;
+    readonly listTaskGroups: Effect.Effect<ReadonlyArray<OrchestrationTaskGroupShell>, E6>;
     readonly latestSequence: Effect.Effect<number, E5>;
     readonly options: ShellSubscriberOptions;
   }) {
@@ -486,6 +496,7 @@ export const loadSubscriberShellSnapshot = Effect.fn("ShellStream.loadSubscriber
               index === null ? undefined : shellSubscriberThreadIds(index, input.options),
             ),
             projects: yield* input.listProjects,
+            taskGroups: yield* input.listTaskGroups,
             snapshotSequence: yield* input.latestSequence,
           };
         }),
@@ -493,6 +504,7 @@ export const loadSubscriberShellSnapshot = Effect.fn("ShellStream.loadSubscriber
       .pipe(NodeSqliteClient.readOnly);
     const base = buildActiveShellSnapshot({
       projects: read.projects,
+      taskGroups: read.taskGroups,
       threads: yield* read.decodeThreads,
       snapshotSequence: read.snapshotSequence,
     });
@@ -580,6 +592,10 @@ export type ShellApplicationEvent =
       Extract<ApplicationStoredEvent, { readonly aggregateKind: "project" }>,
       "aggregateKind" | "aggregateId" | "type" | "sequence"
     >
+  | Pick<
+      Extract<ApplicationStoredEvent, { readonly aggregateKind: "task_group" }>,
+      "aggregateKind" | "aggregateId" | "type" | "sequence"
+    >
   | {
       readonly sequence: number;
       readonly event: Pick<OrchestrationV2StoredEvent["event"], "threadId">;
@@ -592,9 +608,14 @@ export function shouldPublishShellApplicationEvent(
 ): boolean {
   if ("aggregateKind" in stored) return true;
   const { event } = stored;
-  if (event.type === "thread.created" || event.type === "thread.sidebar-parent-updated") {
+  if (
+    event.type === "thread.created" ||
+    event.type === "thread.sidebar-parent-updated" ||
+    event.type === "thread.task-group.updated"
+  ) {
     if (
       event.payload.sidebarParent == null &&
+      event.payload.taskGroupId == null &&
       event.payload.lineage.relationshipToParent === "subagent"
     ) {
       subagentThreadIds.add(event.threadId);
@@ -621,14 +642,13 @@ export function shouldPublishShellApplicationEvent(
 
 /** Shell updates refetch an aggregate; drop transcript bodies before retaining an event. */
 export function toShellApplicationEvent(stored: ApplicationStoredEvent): ShellApplicationEvent {
-  return "aggregateKind" in stored
-    ? {
-        aggregateKind: stored.aggregateKind,
-        aggregateId: stored.aggregateId,
-        type: stored.type,
-        sequence: stored.sequence,
-      }
-    : { sequence: stored.sequence, event: { threadId: stored.event.threadId } };
+  if (!("aggregateKind" in stored)) {
+    return { sequence: stored.sequence, event: { threadId: stored.event.threadId } };
+  }
+  const { sequence } = stored;
+  return stored.aggregateKind === "project"
+    ? { aggregateKind: "project", aggregateId: stored.aggregateId, type: stored.type, sequence }
+    : { aggregateKind: "task_group", aggregateId: stored.aggregateId, type: stored.type, sequence };
 }
 
 export function coalesceShellApplicationEvents<A extends ShellApplicationEvent>(
@@ -638,7 +658,7 @@ export function coalesceShellApplicationEvents<A extends ShellApplicationEvent>(
   for (const stored of events) {
     const key =
       "aggregateKind" in stored
-        ? `project:${stored.aggregateId}`
+        ? `${stored.aggregateKind}:${stored.aggregateId}`
         : `thread:${stored.event.threadId}`;
     latestByAggregate.set(key, stored);
   }
@@ -756,10 +776,11 @@ export function shellStreamItemFromEnrichmentRefresh(input: {
   const resolvedRepositoryIdentityRoots = [
     ...new Set(input.changes.map((change) => change.workspaceRoot)),
   ];
+  const { taskGroups: _taskGroups, ...snapshot } = input.snapshot;
   return {
     kind: "snapshot",
     snapshot: {
-      ...input.snapshot,
+      ...snapshot,
       projects: input.snapshot.projects.filter((project) =>
         resolvedRepositoryIdentityRoots.includes(project.workspaceRoot),
       ),
@@ -781,12 +802,13 @@ export function shellStreamItemsFromInitialSnapshot(input: {
   if (input.resolvedRepositoryIdentityRoots.length === 0) {
     return [authoritative];
   }
+  const { taskGroups: _taskGroups, ...snapshot } = input.snapshot;
   return [
     authoritative,
     {
       kind: "snapshot" as const,
       snapshot: {
-        ...input.snapshot,
+        ...snapshot,
         projects: input.snapshot.projects.filter((project) =>
           input.resolvedRepositoryIdentityRoots.includes(project.workspaceRoot),
         ),

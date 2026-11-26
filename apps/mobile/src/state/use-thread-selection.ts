@@ -69,6 +69,7 @@ function threadDetailToShell(
   return presentThreadShell(environmentId, {
     id: thread.id,
     projectId: thread.projectId,
+    taskGroupId: thread.taskGroupId ?? null,
     title: thread.title,
     providerInstanceId: thread.providerInstanceId,
     modelSelection: thread.modelSelection,
@@ -106,6 +107,7 @@ function threadDetailToShell(
     autoSettleDisabledAt: thread.autoSettleDisabledAt,
     pinnedAt: thread.pinnedAt,
     pinOrderKey: thread.pinOrderKey,
+    sidebarParent: thread.sidebarParent,
     snoozedUntil: thread.snoozedUntil ?? null,
     snoozedAt: thread.snoozedAt ?? null,
     deletedAt: thread.deletedAt,

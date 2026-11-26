@@ -6,8 +6,10 @@ import {
   MessageId,
   RunId,
   ORCHESTRATION_V2_WS_METHODS,
+  OrchestrationV2RpcSchemas,
   ProjectId,
   ProviderInstanceId,
+  TaskGroupId,
   ThreadId,
   type OrchestrationV2Command,
   type OrchestrationV2ShellSnapshot,
@@ -21,6 +23,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -39,6 +42,8 @@ import * as ThreadHistoryController from "./threadHistoryController.ts";
 
 const ENVIRONMENT_ID = EnvironmentId.make("remote");
 const THREAD_ID = ThreadId.make("thread");
+const TASK_GROUP_ID = TaskGroupId.make("task-group");
+const isDispatchCommand = Schema.is(OrchestrationV2RpcSchemas.dispatchCommand.input);
 const NOW = DateTime.makeUnsafe("2026-09-12T10:00:00.000Z");
 const FUTURE = DateTime.makeUnsafe("2099-01-01T00:00:00.000Z");
 const APPROVAL = {
@@ -418,6 +423,7 @@ describe("remote thread lifecycle commands", () => {
     ["setAutoSettle", { enabled: false }, { autoSettleDisabledAt: expect.any(Object) }],
     ["reorderPin", { orderKey: "b" }, { pinOrderKey: "b" }],
     ["reorderActive", { orderKey: "b" }, { activeOrderKey: "b" }],
+    ["setTaskGroup", { taskGroupId: TASK_GROUP_ID }, { taskGroupId: TASK_GROUP_ID }],
     [
       "setSidebarParent",
       { parent: { kind: "thread", threadId: ThreadId.make("other") } },
@@ -471,6 +477,7 @@ describe("remote thread lifecycle commands", () => {
                 orderKey: "a",
                 snoozedUntil: "2099-01-01T00:00:00.000Z",
                 parent: { kind: "thread", threadId: ThreadId.make("other") },
+                taskGroupId: null,
                 ...input,
               },
             }),
@@ -483,6 +490,87 @@ describe("remote thread lifecycle commands", () => {
         yield* Deferred.fail(request.reply, new Error("Remote rejected the action"));
         expect((yield* Fiber.join(result))._tag).toBe("Failure");
         expect(h.registry.get(h.visibleAtom)).toBe(initial);
+      }),
+  );
+
+  it.effect("hands an accepted group move over to the authoritative shell", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness();
+      const source = h.snapshotAtom(ENVIRONMENT_ID);
+      const thread = {
+        ...SNAPSHOT.threads[0]!,
+        sidebarParent: { kind: "thread" as const, threadId: ThreadId.make("old-parent") },
+      };
+      const initial = { ...SNAPSHOT, threads: [thread] };
+      h.registry.set(source, initial);
+      const result = yield* Effect.forkChild(
+        h.commands.setTaskGroup.run(h.registry, {
+          environmentId: ENVIRONMENT_ID,
+          input: { threadId: THREAD_ID, taskGroupId: TASK_GROUP_ID },
+        }),
+        { startImmediately: true },
+      );
+      const request = yield* Queue.take(h.requests);
+      expect(request.command).toMatchObject({
+        type: "thread.taskGroup.set",
+        threadId: THREAD_ID,
+        taskGroupId: TASK_GROUP_ID,
+      });
+      expect(isDispatchCommand(request.command)).toBe(true);
+      yield* Deferred.succeed(request.reply, { sequence: 3 });
+      yield* Fiber.join(result);
+      h.registry.set(source, { ...initial, snapshotSequence: 2 });
+      expect(h.registry.get(h.visibleAtom)?.threads[0]?.taskGroupId).toBe(TASK_GROUP_ID);
+
+      const confirmed = {
+        ...initial,
+        snapshotSequence: 3,
+        threads: [
+          { ...thread, taskGroupId: TASK_GROUP_ID, sidebarParent: { kind: "top_level" as const } },
+        ],
+      };
+      h.registry.set(source, confirmed);
+      expect(h.registry.get(h.visibleAtom)).toBe(confirmed);
+      expect(h.registry.get(h.commands.pendingThreadIdsAtom(ENVIRONMENT_ID)).size).toBe(0);
+    }),
+  );
+
+  it.effect.each([undefined, null, TASK_GROUP_ID])(
+    "passes group membership %s through thread creation",
+    (taskGroupId) =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness();
+        const {
+          id: threadId,
+          projectId,
+          title,
+          modelSelection,
+          runtimeMode,
+          interactionMode,
+        } = SNAPSHOT.threads[0]!;
+        const result = yield* Effect.forkChild(
+          h.commands.create.run(h.registry, {
+            environmentId: ENVIRONMENT_ID,
+            input: {
+              threadId,
+              projectId,
+              title,
+              modelSelection,
+              runtimeMode,
+              interactionMode,
+              branch: null,
+              worktreePath: null,
+              ...(taskGroupId === undefined ? {} : { taskGroupId }),
+            },
+          }),
+          { startImmediately: true },
+        );
+        const request = yield* Queue.take(h.requests);
+        expect(request.command.type).toBe("thread.create");
+        if (taskGroupId === undefined) expect(request.command).not.toHaveProperty("taskGroupId");
+        else expect(request.command).toHaveProperty("taskGroupId", taskGroupId);
+        yield* Deferred.succeed(request.reply, { sequence: 2 });
+        expect(yield* Fiber.join(result)).toEqual({ sequence: 2 });
       }),
   );
 

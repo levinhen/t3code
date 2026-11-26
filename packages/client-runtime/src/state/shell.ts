@@ -42,6 +42,7 @@ import {
   applyShellStreamEvents,
   type ShellStreamEvent,
   mergeShellSnapshotProjects,
+  reuseUnchangedTaskGroupShells,
   reuseUnchangedThreadShells,
   sameThreadPullRequests,
 } from "./shellReducer.ts";
@@ -125,6 +126,7 @@ function shellIdentity(
     databaseMigration: environment.databaseMigration ?? null,
     omitIdleSubagents,
     omitOlderSettled: flags.shellOlderSettled === true && omitIdleSubagents,
+    tracksTaskGroups: true,
   };
 }
 
@@ -146,7 +148,8 @@ function sameShellIdentity(left: ShellOriginIdentity, right: ShellOriginIdentity
     left.serverVersion === right.serverVersion &&
     left.databaseMigration === right.databaseMigration &&
     left.omitIdleSubagents === right.omitIdleSubagents &&
-    left.omitOlderSettled === right.omitOlderSettled
+    left.omitOlderSettled === right.omitOlderSettled &&
+    left.tracksTaskGroups === right.tracksTaskGroups
   );
 }
 
@@ -235,6 +238,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         snapshot.snapshotSequence >= lastPersisted.snapshot.snapshotSequence &&
         snapshot.schemaVersion === lastPersisted.snapshot.schemaVersion &&
         snapshot.projects === lastPersisted.snapshot.projects &&
+        snapshot.taskGroups === lastPersisted.snapshot.taskGroups &&
         snapshot.threads === lastPersisted.snapshot.threads &&
         snapshot.archivedThreads === lastPersisted.snapshot.archivedThreads
       ) {
@@ -391,9 +395,12 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         continue;
       }
       const authoritative = item.resolvedRepositoryIdentityRoots === undefined;
+      const previousSnapshot = Option.getOrNull(next.snapshot);
       const nextSnapshot = mergeShellSnapshotProjects(
-        Option.getOrNull(next.snapshot),
-        item.snapshot,
+        previousSnapshot,
+        authoritative
+          ? reuseUnchangedTaskGroupShells(previousSnapshot, item.snapshot)
+          : item.snapshot,
         item.resolvedRepositoryIdentityRoots === undefined
           ? undefined
           : { resolvedRepositoryIdentityRoots: item.resolvedRepositoryIdentityRoots },

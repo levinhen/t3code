@@ -8,6 +8,7 @@ import {
   type ProjectId,
   type ProviderInteractionMode,
   type RuntimeMode,
+  type TaskGroupId,
 } from "@t3tools/contracts";
 import {
   deriveThreadTitleSeed,
@@ -21,6 +22,7 @@ import type { UploadedMobileAttachment } from "./attachmentUpload";
 
 export interface ProjectThreadStartTurnSpec {
   readonly projectId: ProjectId;
+  readonly taskGroupId?: TaskGroupId | null;
   readonly projectCwd: string;
   readonly threadId: string;
   readonly commandId: string;
@@ -66,6 +68,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
     bootstrap: {
       createThread: {
         projectId: spec.projectId,
+        ...(spec.taskGroupId === undefined ? {} : { taskGroupId: spec.taskGroupId }),
         title,
         modelSelection: spec.modelSelection,
         runtimeMode: spec.runtimeMode,

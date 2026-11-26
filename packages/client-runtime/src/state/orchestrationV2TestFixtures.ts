@@ -2,9 +2,11 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  TaskGroupId,
   ThreadId,
   TurnItemId,
   type OrchestrationProjectShell,
+  type OrchestrationTaskGroupShell,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2ShellSnapshot,
   type OrchestrationV2ThreadProjection,
@@ -24,6 +26,18 @@ export const v2Project: OrchestrationProjectShell = {
   repositoryIdentity: null,
   defaultModelSelection: null,
   scripts: [],
+  createdAt: "2026-06-20T00:00:00.000Z",
+  updatedAt: "2026-06-20T00:00:00.000Z",
+};
+
+export const v2TaskGroup: OrchestrationTaskGroupShell = {
+  id: TaskGroupId.make("task-group-v2"),
+  title: "Task group",
+  hasCustomTitle: true,
+  color: "slate",
+  pinnedAt: null,
+  pinOrderKey: null,
+  archivedAt: null,
   createdAt: "2026-06-20T00:00:00.000Z",
   updatedAt: "2026-06-20T00:00:00.000Z",
 };

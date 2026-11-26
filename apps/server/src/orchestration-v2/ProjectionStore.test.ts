@@ -28,6 +28,7 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
+  TaskGroupId,
   TurnItemId,
   type ThreadPullRequestLink,
   isLiveSubagentShell,
@@ -3386,6 +3387,7 @@ it.effect("SQL list older settled threads below a cursor", () =>
       readonly project?: string;
       readonly subagent?: boolean;
       readonly archived?: boolean;
+      readonly taskGroupId?: TaskGroupId;
       readonly snoozedUntilDay?: number;
     }) =>
       store.apply({
@@ -3398,6 +3400,7 @@ it.effect("SQL list older settled threads below a cursor", () =>
           creationSource: "web",
           id: id(input.name),
           projectId: ProjectId.make(input.project ?? "project:a"),
+          ...(input.taskGroupId === undefined ? {} : { taskGroupId: input.taskGroupId }),
           title: input.name,
           providerInstanceId,
           modelSelection,
@@ -3431,6 +3434,13 @@ it.effect("SQL list older settled threads below a cursor", () =>
     yield* createThread({ name: "unsettled", settledDay: null });
     yield* createThread({ name: "child", settledDay: 1, subagent: true });
     yield* createThread({ name: "archived", settledDay: 1, archived: true });
+    const taskGroupId = TaskGroupId.make("group-old");
+    yield* createThread({ name: "grouped", settledDay: 1, taskGroupId });
+    assert.equal(
+      (yield* store.listActiveShellIndex()).find(({ id: candidate }) => candidate === id("grouped"))
+        ?.taskGroupId,
+      taskGroupId,
+    );
 
     const list = (
       before: { readonly settledAt: string; readonly threadId?: ThreadId },

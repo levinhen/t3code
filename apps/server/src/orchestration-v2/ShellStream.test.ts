@@ -5,7 +5,7 @@ import type {
   OrchestrationV2ShellStreamItem,
   OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
-import { ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { ProjectId, ProviderInstanceId, TaskGroupId, ThreadId } from "@t3tools/contracts";
 import type * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -280,11 +280,13 @@ describe("omitOlderSettledShells", () => {
       sideChat,
       row("old", 30),
       row("b-old", 40),
+      row("grouped-old", 90, { taskGroupId: TaskGroupId.make("group-old") }),
       row("unsettled", null),
     ]);
     expect(result.threads.map((thread) => thread.id)).toEqual([
       ...newest.map((thread) => thread.id),
       "side-chat",
+      "grouped-old",
       "unsettled",
     ]);
     expect(result.olderSettled).toEqual({

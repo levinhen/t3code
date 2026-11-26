@@ -25,6 +25,7 @@ import {
   VcsProcessSpawnError,
   MessageId,
   ProjectId,
+  TaskGroupId,
   ThreadId,
   TurnItemId,
   ProviderDriverKind,
@@ -180,6 +181,8 @@ import * as ManagedPolicy from "./policy/ManagedPolicy.ts";
 import * as EventStore from "./orchestration-v2/EventStore.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
+import * as TaskGroupService from "./orchestration-v2/TaskGroupService.ts";
+import * as TaskGroupStore from "./orchestration-v2/TaskGroupStore.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as EventSink from "./orchestration-v2/EventSink.ts";
 import * as LegacyV1ThreadImporter from "./orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
@@ -305,7 +308,7 @@ it.effect("runs editor, remote open target and direct endpoint discovery side by
   }),
 );
 
-const ReplayTestLayer = OrchestrationEventStore.layer.pipe(
+const ReplayTestLayer = Layer.merge(OrchestrationEventStore.layer, TaskGroupStore.layer).pipe(
   Layer.provideMerge(SqlitePersistence.layerMemory),
 );
 
@@ -498,6 +501,8 @@ it.effect("coalesces streaming replay before synchronization and the live tail",
 it.effect("shell groups read distinct threads once and keep each event's own sequence", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const taskGroups = yield* TaskGroupStore.TaskGroupStore;
+    const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
     const now = "2026-10-27T00:00:00.000Z";
     const insert = (aggregateKind: "thread" | "project", streamId: string, version: number) =>
       sql<{ sequence: number }>`
@@ -524,6 +529,30 @@ it.effect("shell groups read distinct threads once and keep each event's own seq
     yield* insert("thread", "thread:active", 0);
     const archived = yield* insert("thread", "thread:archived", 0);
     const projectUpdated = yield* insert("project", project.id, 0);
+    const taskGroupId = TaskGroupId.make(project.id);
+    const groupCreated = yield* applicationEvents.appendTaskGroupEvent({
+      aggregateKind: "task_group",
+      aggregateId: taskGroupId,
+      type: "task_group.created",
+      eventId: EventId.make("task-group:created"),
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      occurredAt: now,
+      payload: {
+        id: taskGroupId,
+        title: "Launch checklist",
+        hasCustomTitle: true,
+        color: "green",
+        pinnedAt: null,
+        pinOrderKey: null,
+        archivedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    yield* taskGroups.apply(groupCreated);
     const active = yield* insert("thread", "thread:active", 1);
     const missing = yield* insert("thread", "thread:missing", 0);
 
@@ -588,13 +617,16 @@ it.effect("shell groups read distinct threads once and keep each event's own seq
                 ? [[item.kind, item.sequence, item.threadId]]
                 : item.kind === "project.updated"
                   ? [[item.kind, item.sequence, item.project.id]]
-                  : [],
+                  : item.kind === "task_group.updated"
+                    ? [[item.kind, item.sequence, item.taskGroup.id]]
+                    : [],
           ),
         ),
       );
     const expectedGroup = [
       ["thread.removed", archived, "thread:archived"],
       ["project.updated", projectUpdated, project.id],
+      ["task_group.updated", groupCreated.sequence, taskGroupId],
       ["thread.updated", active, "thread:active"],
       ["thread.removed", missing, "thread:missing"],
     ];
@@ -720,6 +752,33 @@ it.effect("shares each live event item across subscribers and dedupes bodies per
 
 it.effect("shell snapshots omit idle children and older settled threads only on request", () =>
   Effect.gen(function* () {
+    const groups = yield* TaskGroupStore.TaskGroupStore;
+    const taskGroupId = TaskGroupId.make("shell-snapshot-group");
+    const now = DateTime.formatIso(yield* DateTime.now);
+    const taskGroup = {
+      id: taskGroupId,
+      title: "Long running project",
+      hasCustomTitle: true,
+      color: "amber",
+      pinnedAt: null,
+      pinOrderKey: null,
+      archivedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    } as const;
+    yield* groups.apply({
+      aggregateKind: "task_group",
+      aggregateId: taskGroupId,
+      type: "task_group.created",
+      sequence: 1,
+      eventId: EventId.make("shell-snapshot-group-create"),
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      occurredAt: now,
+      metadata: {},
+      payload: taskGroup,
+    });
     const shell = (
       id: string,
       parent: string | null,
@@ -753,6 +812,7 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
       shell("live", "parent", "running"),
       ...Array.from({ length: 25 }, (_, index) => shell(`recent-${index}`, null, null, 1)),
       shell("old", null, null, 30),
+      { ...shell("old-grouped", null, null, 60), taskGroupId },
       shell("remote-parent", null, null, 40),
       shell("remote-child-parent", "parent", null),
     ];
@@ -811,12 +871,13 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
       full?.threads.map((thread) => thread.id),
       threads.map((thread) => thread.id),
     );
+    assert.deepEqual(full?.taskGroups, [taskGroup]);
     assert.isUndefined(full?.olderSettled);
     assert.isUndefined(full?.idleSubagents);
     const withoutChildren = yield* firstSnapshot({ omitIdleSubagents: true });
     assert.deepEqual(
       withoutChildren?.threads.map((thread) => thread.id),
-      ["parent", "live", ...recent, "old", "remote-parent", "remote-child-parent"],
+      ["parent", "live", ...recent, "old", "old-grouped", "remote-parent", "remote-child-parent"],
     );
     // Counted and named by provider, once each, so a collapsed parent needs no family read.
     assert.deepEqual(withoutChildren?.idleSubagents, [
@@ -834,7 +895,7 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
     const withoutOld = yield* firstSnapshot({ omitIdleSubagents: true, omitOlderSettled: true });
     assert.deepEqual(
       withoutOld?.threads.map((thread) => thread.id),
-      ["parent", "live", ...recent, "remote-parent", "remote-child-parent"],
+      ["parent", "live", ...recent, "old-grouped", "remote-parent", "remote-child-parent"],
     );
     assert.deepEqual(withoutOld?.olderSettled?.counts, [
       { projectId: ProjectId.make("project"), count: 2 },
@@ -844,6 +905,7 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
 
 // Build the production RPC layer; unrelated capabilities fail if this test calls them.
 const layerUnusedConfigRpcServices = Layer.mergeAll(
+  Layer.mock(TaskGroupService.TaskGroupService)({}),
   Layer.mock(DocumentText.DocumentText)({}),
   Layer.mock(ServerSecretStore.ServerSecretStore)({}),
   Layer.mock(SecretCheck.SecretCheck)({}),
