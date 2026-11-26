@@ -2503,9 +2503,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const canJoinThreads = (sourceKey: string, targetKey: string) => {
     const source = allThreadsByKey.get(sourceKey);
     const target = allThreadsByKey.get(targetKey);
+    // Only top-level and group rows split; a subagent row stays a nest target.
+    const targetListed = sectionByThreadKey.has(targetKey) || taskGroupMemberKeys.has(targetKey);
     if (
       source === undefined ||
       target === undefined ||
+      !targetListed ||
       sourceKey === targetKey ||
       source.environmentId !== target.environmentId ||
       !canGroupThread(source) ||

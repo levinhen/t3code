@@ -155,8 +155,8 @@ describe("sidebar collision detection", () => {
       })({ ...withTargets, pointerCoordinates: { x, y: middle } })[0]?.id;
     expect(detect(true, rect.left + 10)).toBe(joinId);
     expect(detect(true, rect.right - 10)).toBe(id);
-    // A half that cannot take the thread falls back to ordinary sorting.
-    expect(detect(false, rect.left + 10)).toBe("blocked");
+    // A row that cannot group, such as a nested subagent, nests from its whole middle.
+    expect(detect(false, rect.left + 10)).toBe(id);
   });
 
   it("drops onto a task group block the pointer is inside", () => {

@@ -73,9 +73,9 @@ export function createSidebarCollisionDetection(
           pointer.y > rect.bottom - inset
         )
           continue;
-        if (options.canJoin && pointer.x < rect.left + rect.width / 2) {
-          if (options.canJoin(key)) return [{ id: sidebarJoinId(key) }];
-          continue;
+        // A row that cannot group nests from its whole middle, as before the split.
+        if (options.canJoin?.(key) && pointer.x < rect.left + rect.width / 2) {
+          return [{ id: sidebarJoinId(key) }];
         }
         if (!options.canNest(key)) continue;
         return [{ id: container.id }];
