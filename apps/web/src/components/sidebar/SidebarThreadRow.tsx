@@ -124,7 +124,9 @@ import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelName } from "../chat/providerIconUtils";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
-import { sidebarNestId } from "../Sidebar.drag";
+import { SIDEBAR_DRAG_Y_PROPERTY, sidebarNestId } from "../Sidebar.drag";
+import { sidebarJoinId } from "./taskGroups.logic";
+import { SidebarRowDropCard } from "./SidebarRowDropCard";
 import type { SidebarSubtreeSummary } from "./subagentTree";
 import { useThreadRunningTerminalIds } from "../../state/terminalSessions";
 import { InlineButton } from "../ui/button";
@@ -499,7 +501,14 @@ function SnoozeMenuButton(props: {
 type SortableThreadRowBag = Pick<
   ReturnType<typeof useSortable>,
   "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
-> & { readonly nestOver?: boolean };
+> & { readonly nestOver?: boolean; readonly joinOver?: boolean };
+
+/** What the halves of a covered row would do with the thread dragged over it. */
+export interface SidebarRowDropHint {
+  /** The left half's label: the row's task group, or a new one. Null when it cannot group. */
+  readonly joinLabel: string | null;
+  readonly canNest: boolean;
+}
 
 export const draftSurfaceClassName = "bg-warning/4 hover:bg-warning/8";
 export const draftPenClassName = "size-3 shrink-0 text-warning-foreground";
@@ -532,42 +541,98 @@ export function SortableThreadRow(
         : SIDEBAR_SORTABLE_DRAG_ENABLED,
     animateLayoutChanges: animateSidebarLayoutChanges,
   });
-  const nest = useDroppable({
-    id: sidebarNestId(sortableId),
-    disabled:
-      !canOperateThread ||
-      rowProps.thread.archivedAt !== null ||
-      rowProps.thread.lineage.sideChat === true ||
-      rowProps.thread.lineage.workflowStep === true,
-  });
+  const covered = useCoveredRowDroppables(sortableId, rowProps.thread, canOperateThread);
   const setRowNodeRef = (node: HTMLElement | null) => {
     setNodeRef(node);
-    nest.setNodeRef(node);
+    covered.setNodeRef(node);
   };
   // dnd-kit memoizes each field but not the bag, so the memoized row would
   // rerender on every shell update without this.
   const bag = {
     listeners,
     setNodeRef: setRowNodeRef,
-    nestOver: nest.isOver && !contextDrag,
+    nestOver: covered.nestOver && !contextDrag,
+    joinOver: covered.joinOver && !contextDrag,
     transform: contextDrag ? null : transform,
     transition: contextDrag && isDragging ? "transform 150ms ease-out" : transition,
     isDragging: isDragging && !contextDrag,
   };
-  // The sidebar arranges rows from quiet shells, which hold still while a
-  // thread streams; reading the live shell here re-renders only this row.
-  const liveThread = useThreadShell(
-    scopeThreadRef(rowProps.thread.environmentId, rowProps.thread.id),
-  );
-  // A runtime on the arranged copy but not the run-less live shell is the list's launch overlay.
-  const thread =
-    liveThread === null
-      ? rowProps.thread
-      : rowProps.thread.runtime !== null
-        ? asLaunchingThread(liveThread)
-        : liveThread;
+  const thread = useArrangedLiveThread(rowProps.thread);
   // Keyed by variant so a card/slim switch remounts the row.
   return <SidebarThreadRow key={rowProps.variant} {...rowProps} thread={thread} sortable={bag} />;
+}
+
+/**
+ * A row inside a task group. The group owns its order, so the row drags freely instead of
+ * sorting; the list's sortable strategy only arranges top-level rows.
+ */
+export function DraggableThreadRow(
+  props: Omit<SidebarThreadRowProps, "sortable"> & {
+    sortableId: string;
+    sortableDisabled: boolean;
+    contextDrag: boolean;
+  },
+) {
+  const { sortableId, sortableDisabled, contextDrag, ...rowProps } = props;
+  const canOperateThread = useEnvironmentScope(
+    rowProps.thread.environmentId,
+    AuthOrchestrationOperateScope,
+  );
+  const drag = useDraggable({ id: sortableId, disabled: sortableDisabled || !canOperateThread });
+  const covered = useCoveredRowDroppables(sortableId, rowProps.thread, canOperateThread);
+  const setRowNodeRef = (node: HTMLElement | null) => {
+    drag.setNodeRef(node);
+    covered.setNodeRef(node);
+  };
+  const isDragging = drag.isDragging && !contextDrag;
+  const bag = {
+    listeners: drag.listeners,
+    setNodeRef: setRowNodeRef,
+    nestOver: covered.nestOver && !contextDrag,
+    joinOver: covered.joinOver && !contextDrag,
+    transform: isDragging ? drag.transform : null,
+    transition: undefined,
+    isDragging,
+  };
+  const thread = useArrangedLiveThread(rowProps.thread);
+  return <SidebarThreadRow key={rowProps.variant} {...rowProps} thread={thread} sortable={bag} />;
+}
+
+/** The two halves a dragged thread can land on: group with this row (left) or nest under it. */
+function useCoveredRowDroppables(
+  threadKey: string,
+  thread: SidebarThreadSummary,
+  canOperateThread: boolean,
+) {
+  const disabled =
+    !canOperateThread ||
+    thread.archivedAt !== null ||
+    thread.lineage.sideChat === true ||
+    thread.lineage.workflowStep === true;
+  const nest = useDroppable({ id: sidebarNestId(threadKey), disabled });
+  const join = useDroppable({ id: sidebarJoinId(threadKey), disabled });
+  return {
+    setNodeRef: (node: HTMLElement | null) => {
+      nest.setNodeRef(node);
+      join.setNodeRef(node);
+    },
+    nestOver: nest.isOver,
+    joinOver: join.isOver,
+  };
+}
+
+/**
+ * The sidebar arranges rows from quiet shells, which hold still while a
+ * thread streams; reading the live shell here re-renders only this row.
+ */
+function useArrangedLiveThread(arranged: SidebarThreadSummary): SidebarThreadSummary {
+  const liveThread = useThreadShell(scopeThreadRef(arranged.environmentId, arranged.id));
+  // A runtime on the arranged copy but not the run-less live shell is the list's launch overlay.
+  return liveThread === null
+    ? arranged
+    : arranged.runtime !== null
+      ? asLaunchingThread(liveThread)
+      : liveThread;
 }
 export type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 export const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
@@ -607,6 +672,12 @@ export const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
       <T>Top level</T>
     </>
   ),
+  ungroup: (
+    <>
+      <ArrowUpIcon aria-hidden className="size-3" />
+      <T>Leave group</T>
+    </>
+  ),
 };
 
 const TOP_STATUS_ICONS = {
@@ -640,6 +711,8 @@ type SidebarThreadRowProps = {
   dropVerb: SidebarDropVerb | null;
   dragOverPinned: boolean;
   draggingOverNest?: boolean | undefined;
+  /** Set on the row a dragged thread covers; it then shows the group / nest halves. */
+  dropHint?: SidebarRowDropHint | null | undefined;
   insertEdge?: "before" | "after" | null | undefined;
   sweepAction: SidebarSweepAction | null;
   snoozeWakeLabelText: string | null;
@@ -1080,20 +1153,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     shouldRecede &&
       (status === "preparing" || status === "working") &&
       "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
-    (isFileDragOver || props.sortable?.nestOver) && "ring-1 ring-inset ring-primary/70",
-    props.sortable?.nestOver && "bg-primary/10",
+    isFileDragOver && "ring-1 ring-inset ring-primary/70",
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
     props.sortable?.isDragging &&
       (props.draggingOverNest
-        ? "bg-sidebar/90 text-sidebar-foreground opacity-80 shadow-md"
+        ? "bg-sidebar/90 text-sidebar-foreground opacity-70 shadow-md"
         : "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg"),
   );
   const sortable = props.sortable;
+  // Covering a row or a group, the source keeps following the pointer under the drop card.
+  const followsPointer = sortable?.isDragging === true && props.draggingOverNest === true;
   const sortableRootProps = sortable
     ? {
         ref: sortable.setNodeRef,
         style: {
-          transform: CSS.Translate.toString(sortable.transform),
+          transform:
+            followsPointer && sortable.transform === null
+              ? `translate3d(0, var(${SIDEBAR_DRAG_Y_PROPERTY}, 0px), 0)`
+              : CSS.Translate.toString(sortable.transform),
           transition: sortable.transition,
           // A zero-height boundary also makes dnd-kit scale the source to
           // zero. Only projected peers use scaleY as a visibility sentinel.
@@ -1110,11 +1187,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     : props.sweepAction === "unsnooze"
       ? "wake"
       : props.sweepAction;
-  const nestIndicator = sortable?.nestOver ? (
-    <span className="pointer-events-none absolute right-2 top-1.5 z-20 rounded-sm bg-primary px-1.5 py-0.5 text-2xs font-medium text-primary-foreground shadow-xs">
-      <T>Nest here</T>
-    </span>
-  ) : null;
+  const nestIndicator =
+    sortable?.nestOver || sortable?.joinOver ? (
+      <SidebarRowDropCard
+        target={sortable.joinOver ? "join" : "nest"}
+        joinLabel={props.dropHint?.joinLabel ?? null}
+        canNest={props.dropHint?.canNest ?? sortable.nestOver === true}
+      />
+    ) : null;
   const insertIndicator =
     props.insertEdge != null ? (
       <span
@@ -1452,6 +1532,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           "relative list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(9)]",
           metaLine !== null && multiline && "[contain-intrinsic-size:auto_--spacing(13.5)]",
           sortable?.isDragging && "relative z-20",
+          nestIndicator !== null && "z-30",
         )}
       >
         {insertIndicator}
@@ -1661,6 +1742,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         "relative list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
         metaLineEmpty && "[contain-intrinsic-size:auto_60px]",
         sortable?.isDragging && "relative z-20",
+        nestIndicator !== null && "z-30",
       )}
     >
       {insertIndicator}

@@ -163,6 +163,26 @@ Pinned threads stay above the folders, and Snoozed and Settled stay below them. 
 can drag a thread onto the composer to mention it, but not within the sidebar, and the Working
 section is off. Each device keeps its own choice.
 
+### Group threads into tasks
+
+A task group collects the threads of one piece of work, even across projects, like a tab group
+in a browser. On web and desktop, drag a thread onto another thread: the row you cover splits in
+two. Drop on its left half to start a task group with both threads, or on its right half to nest
+the thread under it. Drag a thread onto a group to add it, and out into the list to take it out.
+A thread's menu also has **Task group**, to start a group, move it to another, or remove it.
+
+T3 Code names a new group from its threads with your text generation model. Double-click the
+name to rename it; its menu changes the colour, pins the group above the others, or writes a
+new name. The pen button on a group starts a thread inside it, in the project its latest thread
+uses. Any other new thread joins no group.
+
+Settled threads fold into the group's own **Settled** list. Snoozed threads wait in **Snoozed**
+and return to their group when they wake. **Complete task group** settles its threads and moves
+the group to **Completed tasks**, where **Restore task group** brings it back. **Ungroup threads**
+removes the group and keeps every thread. Turn on **Settings → Labs → Task group folders** to
+split each group by project. A group belongs to one machine, so threads on other machines can't
+join it, and the mobile app lists grouped threads without their groups.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

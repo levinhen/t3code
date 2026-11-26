@@ -695,7 +695,11 @@ describe("sidebar subagent tree", () => {
     });
     const rootRef = scopeThreadRef(root.environmentId, root.id);
     const show = vi.fn().mockResolvedValue("promote");
-    const mutation = vi.fn().mockResolvedValue({ _tag: "Success" });
+    // One mock answers every command; a new task group reads its id back.
+    const mutation = vi.fn().mockResolvedValue({
+      _tag: "Success",
+      value: { taskGroup: { id: "group" } },
+    });
     vi.mocked(readLocalApi).mockReturnValue({ contextMenu: { show } } as unknown as LocalApi);
     vi.mocked(readEnvironmentScope).mockReturnValue(true);
     vi.mocked(useEnvironmentScope).mockReturnValue(true);
@@ -764,22 +768,47 @@ describe("sidebar subagent tree", () => {
       });
     const x = sourceBounds.left + sourceBounds.width / 2;
     const y = sourceBounds.top + sourceBounds.height / 2;
-    const targetX = destBounds.left + destBounds.width / 2;
+    // The covered row splits: its left half groups the threads, its right half nests.
+    const groupX = destBounds.left + destBounds.width / 4;
+    const nestX = destBounds.left + (destBounds.width * 3) / 4;
     const targetY = destBounds.top + destBounds.height / 2;
     using _release = {
       [Symbol.dispose]: () => document.dispatchEvent(pointer("pointerup", -100, 100)),
     };
     await act(() => row.element().dispatchEvent(pointer("pointerdown", x, y)));
     await act(() => document.dispatchEvent(pointer("pointermove", x + 12, y)));
-    await act(() => document.dispatchEvent(pointer("pointermove", targetX, targetY)));
-    await expect.element(screen.getByText("Nest here")).toBeInTheDocument();
-    await act(() => document.dispatchEvent(pointer("pointerup", targetX, targetY)));
+    await act(() => document.dispatchEvent(pointer("pointermove", groupX, targetY)));
+    const card = screen.getByTestId("sidebar-row-drop-card");
+    await expect.element(card).toHaveAttribute("data-drop-target", "join");
+    await act(() => document.dispatchEvent(pointer("pointermove", nestX, targetY)));
+    await expect.element(card).toHaveAttribute("data-drop-target", "nest");
+    await act(() => document.dispatchEvent(pointer("pointerup", nestX, targetY)));
     await vi.waitFor(() =>
       expect(mutation).toHaveBeenCalledWith({
         environmentId: child.environmentId,
         input: { threadId: child.id, parent: { kind: "thread", threadId: target.id } },
       }),
     );
+    mutation.mockClear();
+
+    // Dropped on the left half instead, the subagent leaves the tree and starts a task group.
+    await act(() => row.element().dispatchEvent(pointer("pointerdown", x, y)));
+    await act(() => document.dispatchEvent(pointer("pointermove", x + 12, y)));
+    await act(() => document.dispatchEvent(pointer("pointermove", groupX, targetY)));
+    await expect
+      .element(screen.getByTestId("sidebar-row-drop-card"))
+      .toHaveAttribute("data-drop-target", "join");
+    await act(() => document.dispatchEvent(pointer("pointerup", groupX, targetY)));
+    await vi.waitFor(() =>
+      expect(mutation).toHaveBeenCalledWith({
+        environmentId: child.environmentId,
+        input: expect.objectContaining({ threadIds: [target.id, child.id] }),
+      }),
+    );
+    expect(mutation).toHaveBeenCalledWith({
+      environmentId: child.environmentId,
+      input: { threadId: child.id, parent: { kind: "top_level" } },
+    });
   });
 
   it("counts the idle children the shell left out without loading them", async () => {

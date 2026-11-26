@@ -1505,6 +1505,7 @@ export function useComposerSend(input: ComposerSendInput) {
                 ? {
                     createThread: {
                       projectId: activeProject.id,
+                      ...(draftThread?.taskGroupId ? { taskGroupId: draftThread.taskGroupId } : {}),
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,

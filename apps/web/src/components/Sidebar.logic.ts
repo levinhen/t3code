@@ -215,6 +215,8 @@ const SIDEBAR_MARKER_PREFIX = "sidebar-marker-";
 
 export type SidebarListMarker =
   | "pinned-header"
+  /** One row holding every live task group, at the top of Active. */
+  | "task-groups"
   | "active-placeholder"
   | "settled-placeholder"
   | "pinned-divider"
@@ -311,7 +313,15 @@ type SidebarThreadDropPlan =
     }
   | { readonly kind: "settle" };
 
-export type SidebarDropVerb = "pin" | "unpin" | "settle" | "unsettle" | "wake" | "promote";
+export type SidebarDropVerb =
+  | "pin"
+  | "unpin"
+  | "settle"
+  | "unsettle"
+  | "wake"
+  | "promote"
+  /** A task group member dropped into the list leaves its group. */
+  | "ungroup";
 
 export function resolveSidebarDropVerb(
   from: SidebarSection,

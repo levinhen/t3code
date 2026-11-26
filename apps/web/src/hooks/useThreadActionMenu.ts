@@ -53,6 +53,7 @@ import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
+import { useTaskGroupActions } from "./useTaskGroupActions";
 import { canTurnThreadIntoProject, useThreadActions } from "./useThreadActions";
 
 function failureToast(title: string, error: unknown) {
@@ -96,6 +97,7 @@ export function useThreadActionMenu(input: {
     turnThreadIntoProject,
   } = useThreadActions();
   const setSidebarParent = useOrchestrationCommand(threadEnvironment.setSidebarParent);
+  const taskGroupActions = useTaskGroupActions();
   const regenerateThreadTitle = useOrchestrationCommand(threadEnvironment.regenerateTitle, {
     reportFailure: false,
   });
@@ -170,6 +172,7 @@ export function useThreadActionMenu(input: {
         snoozePresets,
         canShareWithGuest,
         canTurnIntoProject: canTurnThreadIntoProject(threadRef),
+        ...(configLoaded ? taskGroupActions.menuState(thread) : {}),
       });
       const clicked = await settlePromise(() => api.contextMenu.show(items, position, source));
       if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -184,6 +187,7 @@ export function useThreadActionMenu(input: {
         );
         return;
       }
+      if (taskGroupActions.runMenuAction(action, thread, canPromote)) return;
       if (action.startsWith("snooze:")) {
         const preset =
           action === "snooze:custom"

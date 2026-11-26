@@ -28,6 +28,7 @@ export function LabsSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection id="beta" title={gt("Beta")}>
         <BoringSidebarRow />
+        <TaskGroupFoldersRow />
         {/* Clerk is only mounted when this build has T3 Connect. */}
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
         <LinkedEnvironmentsRow />
@@ -88,6 +89,30 @@ function BoringSidebarMultilineRow() {
             updateSettings({ boringSidebarMultilineRows: Boolean(checked) })
           }
           aria-label={gt("Two-line folder rows")}
+        />
+      }
+    />
+  );
+}
+
+function TaskGroupFoldersRow() {
+  const searchableSetting = useSearchableSetting();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  return (
+    <SettingsRow
+      {...searchableSetting("task-group-folders")}
+      description={gt(
+        "Split each task group in the sidebar by working folder, with a new-thread button for each folder. Off, a group lists its threads in one run, like a tab group.",
+      )}
+      control={
+        <Switch
+          checked={settings.taskGroupDirectoryGroupingEnabled}
+          onCheckedChange={(checked) =>
+            updateSettings({ taskGroupDirectoryGroupingEnabled: Boolean(checked) })
+          }
+          aria-label={gt("Task group folders")}
         />
       }
     />

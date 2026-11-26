@@ -118,6 +118,9 @@ vi.mock("./useSettings", () => ({
       timestampFormat: "12-hour",
     }),
 }));
+vi.mock("./useTaskGroupActions", () => ({
+  useTaskGroupActions: () => ({ menuState: () => ({}), runMenuAction: () => false }),
+}));
 vi.mock("./useThreadActions", () => ({
   canTurnThreadIntoProject: () => false,
   useThreadActions: () =>

@@ -8,6 +8,7 @@ import {
   type SidebarListMarker,
   type SidebarSection,
 } from "./Sidebar.logic";
+import { sidebarJoinId, sidebarJoinKey, sidebarTaskGroupDropKey } from "./sidebar/taskGroups.logic";
 
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
 const hidden = { ...stationary, scaleY: 0 };
@@ -28,8 +29,16 @@ export function restrictBelowSidebarLabel(
   return transform.y < minimumY ? { ...transform, y: minimumY } : transform;
 }
 
+/** The pointer's vertical drag offset, set on the thread list while a drag moves. */
+export const SIDEBAR_DRAG_Y_PROPERTY = "--sidebar-drag-y";
+
 export const sidebarNestId = (threadKey: string) => `nest:${threadKey}`;
 export const sidebarNestKey = (id: string) => (id.startsWith("nest:") ? id.slice(5) : null);
+
+const isRowDropId = (id: string) =>
+  sidebarNestKey(id) !== null ||
+  sidebarJoinKey(id) !== null ||
+  sidebarTaskGroupDropKey(id) !== null;
 
 export function createSidebarCollisionDetection(
   isValidTarget: (id: string) => boolean,
@@ -37,6 +46,9 @@ export function createSidebarCollisionDetection(
     items?: readonly SidebarListItem[];
     activationY?: number | null;
     canNest?: (key: string) => boolean;
+    /** With it, a covered row splits: the left half groups the two threads, the right nests. */
+    canJoin?: (key: string) => boolean;
+    canJoinGroup?: (groupKey: string) => boolean;
   } = {},
 ): CollisionDetection {
   const validity = new Map<string, boolean>();
@@ -61,14 +73,34 @@ export function createSidebarCollisionDetection(
           pointer.y > rect.bottom - inset
         )
           continue;
+        if (options.canJoin && pointer.x < rect.left + rect.width / 2) {
+          if (options.canJoin(key)) return [{ id: sidebarJoinId(key) }];
+          continue;
+        }
         if (!options.canNest(key)) continue;
         return [{ id: container.id }];
+      }
+    }
+    if (pointer && options.canJoinGroup) {
+      for (const container of args.droppableContainers) {
+        const groupKey = sidebarTaskGroupDropKey(String(container.id));
+        if (groupKey === null) continue;
+        const rect = args.droppableRects.get(container.id);
+        if (
+          !rect ||
+          pointer.x < rect.left ||
+          pointer.x > rect.right ||
+          pointer.y < rect.top ||
+          pointer.y > rect.bottom
+        )
+          continue;
+        if (options.canJoinGroup(groupKey)) return [{ id: container.id }];
       }
     }
     let collisions = closestCenter({
       ...args,
       droppableContainers: args.droppableContainers.filter(
-        (container) => sidebarNestKey(String(container.id)) === null,
+        (container) => !isRowDropId(String(container.id)),
       ),
     });
     const items = options.items;
@@ -204,6 +236,9 @@ export function createSidebarSortingStrategy(input: {
     marker("pinned-header");
     projected.push(...groups.pinned);
     marker("pinned-divider");
+    if (items.some((item) => item.kind === "marker" && item.marker === "task-groups")) {
+      marker("task-groups");
+    }
     section("active");
     if (items.some((item) => item.kind === "marker" && item.marker === "working-header")) {
       marker("working-header");

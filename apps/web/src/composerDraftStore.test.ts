@@ -27,6 +27,7 @@ import {
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   RunId,
+  TaskGroupId,
   ThreadId,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2ShellSnapshot,
@@ -2829,6 +2830,37 @@ describe("composerDraftStore attachment references", () => {
     expect(merged.draftsByThreadKey[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]?.prompt).toBe(
       prompt,
     );
+  });
+});
+
+describe("composerDraftStore task group", () => {
+  const projectRef = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("project-task"));
+  const otherProjectRef = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("project-other"));
+  const draftId = DraftId.make("draft-task");
+  const taskGroupId = TaskGroupId.make("group-task");
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  const store = () => useComposerDraftStore.getState();
+
+  it("keeps the group across a project switch and drops it when a plain new thread reuses the draft", () => {
+    store().setProjectDraftThreadId(projectRef, draftId, {
+      threadId: ThreadId.make("thread-task"),
+      taskGroupId,
+    });
+    expect(store().getDraftSession(draftId)?.taskGroupId).toBe(taskGroupId);
+
+    // A task spans folders, so moving the draft to another project keeps it in the group.
+    store().setDraftThreadContext(draftId, { projectRef: otherProjectRef });
+    expect(store().getDraftSession(draftId)?.taskGroupId).toBe(taskGroupId);
+    expect(
+      partializeComposerDraftStoreState(store()).draftThreadsByThreadKey[draftId],
+    ).toMatchObject({ taskGroupId });
+
+    store().setProjectDraftThreadId(otherProjectRef, draftId, { taskGroupId: null });
+    expect(store().getDraftSession(draftId)).not.toHaveProperty("taskGroupId");
   });
 });
 

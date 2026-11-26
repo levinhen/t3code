@@ -28,6 +28,7 @@ import {
   type ServerProvider,
   type ScopedProjectRef,
   type ScopedThreadRef,
+  TaskGroupId,
   ThreadId,
   SnapShotSource,
 } from "@t3tools/contracts";
@@ -421,6 +422,7 @@ const PersistedDraftThreadState = Schema.Struct({
     Schema.Struct({ url: Schema.String, branch: Schema.String }),
   ),
   worktreeRepositories: Schema.optionalKey(Schema.Array(Schema.String)),
+  taskGroupId: Schema.optionalKey(Schema.String),
   promotedTo: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({
@@ -524,6 +526,8 @@ export interface DraftSessionState {
    * until the user chooses, which leaves the choice to the server's default.
    */
   worktreeRepositories?: ReadonlyArray<string>;
+  /** The task group the thread joins when the draft is sent. */
+  taskGroupId?: TaskGroupId;
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -597,6 +601,7 @@ interface ComposerDraftStoreState {
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
       checkoutPullRequest?: DraftCheckoutPullRequest | null;
+      taskGroupId?: TaskGroupId | null;
     },
   ) => void;
   setProjectDraftThreadId: (
@@ -614,6 +619,7 @@ interface ComposerDraftStoreState {
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
       checkoutPullRequest?: DraftCheckoutPullRequest | null;
+      taskGroupId?: TaskGroupId | null;
     },
   ) => void;
   setDraftThreadContext: (
@@ -1734,6 +1740,7 @@ function createDraftThreadState(
     environmentSelection?: "auto" | "manual";
     loadBalancedEnvironmentId?: EnvironmentId | null;
     checkoutPullRequest?: DraftCheckoutPullRequest | null;
+    taskGroupId?: TaskGroupId | null;
   },
 ): DraftThreadState {
   const projectChanged =
@@ -1763,6 +1770,8 @@ function createDraftThreadState(
     options?.checkoutPullRequest,
     projectChanged,
   );
+  const taskGroupId =
+    options?.taskGroupId === undefined ? existingThread?.taskGroupId : options.taskGroupId;
   return {
     threadId,
     environmentId: projectRef.environmentId,
@@ -1791,6 +1800,8 @@ function createDraftThreadState(
     ...(!projectChanged && existingThread?.worktreeRepositories !== undefined
       ? { worktreeRepositories: existingThread.worktreeRepositories }
       : {}),
+    // A task spans folders, so switching the draft's project keeps its group.
+    ...(taskGroupId ? { taskGroupId } : {}),
     promotedTo: null,
   };
 }
@@ -1853,6 +1864,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.startFromOrigin === right.startFromOrigin &&
     checkoutPullRequestsEqual(left.checkoutPullRequest, right.checkoutPullRequest) &&
     worktreeRepositoriesEqual(left.worktreeRepositories, right.worktreeRepositories) &&
+    left.taskGroupId === right.taskGroupId &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
 }
@@ -2032,6 +2044,10 @@ function normalizePersistedDraftThreads(
                 (path): path is string => typeof path === "string",
               ),
             }
+          : {}),
+        ...(typeof candidateDraftThread.taskGroupId === "string" &&
+        candidateDraftThread.taskGroupId.length > 0
+          ? { taskGroupId: TaskGroupId.make(candidateDraftThread.taskGroupId) }
           : {}),
         promotedTo,
       };
@@ -2819,6 +2835,9 @@ function toHydratedDraftThreadState(
     ...(persistedDraftThread.worktreeRepositories
       ? { worktreeRepositories: persistedDraftThread.worktreeRepositories }
       : {}),
+    ...(persistedDraftThread.taskGroupId
+      ? { taskGroupId: TaskGroupId.make(persistedDraftThread.taskGroupId) }
+      : {}),
     promotedTo: persistedDraftThread.promotedTo
       ? scopeThreadRef(
           persistedDraftThread.promotedTo.environmentId as EnvironmentId,
@@ -3114,6 +3133,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               startFromOrigin: nextStartFromOrigin,
               ...(checkoutPullRequest ? { checkoutPullRequest } : {}),
               ...(worktreeRepositories ? { worktreeRepositories } : {}),
+              ...(existing.taskGroupId ? { taskGroupId: existing.taskGroupId } : {}),
               promotedTo: existing.promotedTo ?? null,
             };
             const isUnchanged =

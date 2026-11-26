@@ -122,6 +122,10 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
     readonly draftChangedDuringPreparation: () => boolean;
   }) => {
     const { attachments: attachmentsSnapshot, messageText } = sendSnapshot;
+    // Every model's thread joins the draft's task group, as a single send would.
+    const taskGroupId = draftId
+      ? useComposerDraftStore.getState().getDraftSession(draftId)?.taskGroupId
+      : undefined;
     const failedSelections: ModelSelection[] = [];
     let clearedDraft = false;
     let releasedComposer = false;
@@ -192,6 +196,7 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
                   bootstrap: {
                     createThread: {
                       projectId: project.id,
+                      ...(taskGroupId ? { taskGroupId } : {}),
                       title,
                       modelSelection: target.selection,
                       runtimeMode,

@@ -21,6 +21,10 @@ export type ThreadActionMenuId =
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
+  | "task-group"
+  | "task-group:new"
+  | "task-group:remove"
+  | `task-group:set:${string}`
   | "rename"
   | "regenerate-title"
   | "mark-unread"
@@ -127,6 +131,11 @@ export interface ThreadActionMenuState {
   readonly canShareWithGuest?: boolean;
   /** A No project thread with its own folder, on a server that can promote it. */
   readonly canTurnIntoProject?: boolean;
+  /** The groups this thread can join, and the one it is in; absent hides the submenu. */
+  readonly taskGroups?: {
+    readonly currentId: string | null;
+    readonly options: ReadonlyArray<{ readonly id: string; readonly label: string }>;
+  };
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
@@ -205,6 +214,33 @@ export function buildThreadActionMenuItems(
                   },
                 ],
               },
+        ]
+      : []),
+    ...(state.taskGroups
+      ? [
+          {
+            id: "task-group" as const,
+            label: resolve(msg("Task group")),
+            icon: "folder-plus",
+            children: [
+              { id: "task-group:new" as const, label: resolve(msg("New task group")) },
+              ...state.taskGroups.options.map((option, index) => ({
+                id: `task-group:set:${option.id}` as const,
+                label: option.label,
+                checked: option.id === state.taskGroups?.currentId,
+                separatorBefore: index === 0,
+              })),
+              ...(state.taskGroups.currentId !== null
+                ? [
+                    {
+                      id: "task-group:remove" as const,
+                      label: resolve(msg("Remove from task group")),
+                      separatorBefore: true,
+                    },
+                  ]
+                : []),
+            ],
+          },
         ]
       : []),
     {

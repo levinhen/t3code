@@ -7,6 +7,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type ScopedProjectRef,
   type T3ProjectFile,
+  type TaskGroupId,
   type ThreadId,
 } from "@t3tools/contracts";
 import { type AnyRouter, useRouter } from "@tanstack/react-router";
@@ -143,6 +144,8 @@ export function createNewThreadHandler(router: AnyRouter) {
       replace?: boolean;
       /** Composer text for the draft, set before it shows. A draft with user text keeps it. */
       prompt?: string;
+      /** The task group the thread joins when sent; without it the thread joins none. */
+      taskGroupId?: TaskGroupId;
     },
   ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
     const projects = readProjects();
@@ -309,6 +312,8 @@ export function createNewThreadHandler(router: AnyRouter) {
     const logicalProjectKey = project
       ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
       : scopedProjectKey(projectRef);
+    // Every new thread sets it, so a reused draft never carries an earlier group along.
+    const taskGroupId = options?.taskGroupId ?? null;
     const hasBranchOption = options?.branch !== undefined;
     const hasWorktreePathOption = options?.worktreePath !== undefined;
     const hasEnvModeOption = options?.envMode !== undefined;
@@ -388,6 +393,7 @@ export function createNewThreadHandler(router: AnyRouter) {
             ...workspaceContext,
             ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
             ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+            taskGroupId,
           },
         );
         const opened = {
@@ -433,6 +439,7 @@ export function createNewThreadHandler(router: AnyRouter) {
         runtimeMode: latestActiveDraftThread.runtimeMode,
         interactionMode: latestActiveDraftThread.interactionMode,
         ...pickExplicitWorkspaceOptions(options),
+        taskGroupId,
       });
       seedPrompt(currentRouteTarget.draftId);
       return Promise.resolve({
@@ -456,6 +463,7 @@ export function createNewThreadHandler(router: AnyRouter) {
         startFromOrigin: options?.startFromOrigin ?? startFromOriginFor(initialEnvMode),
         runtimeMode: defaultRuntimeMode,
         ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+        taskGroupId,
       });
       applyStickyState(draftId);
       const modelSelectionOverride = resolveModelSelectionOverride(draftId);

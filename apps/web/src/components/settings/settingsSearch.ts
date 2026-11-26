@@ -520,6 +520,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "boring-sidebar",
     searchTerms: [msg("beta boring sidebar folder rows multiline branch pull request details")],
   },
+  {
+    id: "task-group-folders",
+    title: msg("Task group folders"),
+    to: "/settings/labs",
+    searchTerms: [msg("beta task groups tab groups split by folder directory project sidebar")],
+  },
 
   {
     id: "tool-call-visibility",

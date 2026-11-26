@@ -15,6 +15,7 @@ import {
   type SidebarListMarker,
   type SidebarSection,
 } from "./Sidebar.logic";
+import { sidebarJoinId, sidebarTaskGroupDropId } from "./sidebar/taskGroups.logic";
 
 const thread = (key: string, section: SidebarSection): SidebarListItem => ({
   kind: "thread",
@@ -128,6 +129,52 @@ describe("sidebar collision detection", () => {
         ...withNest,
         pointerCoordinates: { x: rect.left + 10, y: rect.top + rect.height / 2 },
       })[0]?.id,
+    ).toBe("blocked");
+  });
+
+  it("splits a covered row into a left group half and a right nest half", () => {
+    const args = collisionArgs();
+    const rect = args.droppableRects.get("blocked")!;
+    const id = sidebarNestId("blocked");
+    const joinId = sidebarJoinId("blocked");
+    const row = args.droppableContainers.find((container) => container.id === "blocked")!;
+    const withTargets = {
+      ...args,
+      droppableRects: new Map([...args.droppableRects, [id, rect], [joinId, rect]]),
+      droppableContainers: [
+        ...args.droppableContainers,
+        { ...row, id, key: id },
+        { ...row, id: joinId, key: joinId },
+      ],
+    };
+    const middle = rect.top + rect.height / 2;
+    const detect = (canJoin: boolean, x: number) =>
+      createSidebarCollisionDetection(() => true, {
+        canNest: () => true,
+        canJoin: () => canJoin,
+      })({ ...withTargets, pointerCoordinates: { x, y: middle } })[0]?.id;
+    expect(detect(true, rect.left + 10)).toBe(joinId);
+    expect(detect(true, rect.right - 10)).toBe(id);
+    // A half that cannot take the thread falls back to ordinary sorting.
+    expect(detect(false, rect.left + 10)).toBe("blocked");
+  });
+
+  it("drops onto a task group block the pointer is inside", () => {
+    const args = collisionArgs();
+    const rect = args.droppableRects.get("blocked")!;
+    const groupId = sidebarTaskGroupDropId("env:group");
+    const row = args.droppableContainers.find((container) => container.id === "blocked")!;
+    const withGroup = {
+      ...args,
+      droppableRects: new Map([...args.droppableRects, [groupId, rect]]),
+      droppableContainers: [...args.droppableContainers, { ...row, id: groupId, key: groupId }],
+      pointerCoordinates: { x: rect.left + 10, y: rect.top + 2 },
+    };
+    expect(
+      createSidebarCollisionDetection(() => true, { canJoinGroup: () => true })(withGroup)[0]?.id,
+    ).toBe(groupId);
+    expect(
+      createSidebarCollisionDetection(() => true, { canJoinGroup: () => false })(withGroup)[0]?.id,
     ).toBe("blocked");
   });
 
