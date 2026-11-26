@@ -198,6 +198,26 @@ describe("omitIdleSubagentShells", () => {
     ]);
   });
 
+  it("keeps promoted and reparented idle children and their display parents in the shell", () => {
+    const threads = [
+      row("root", null),
+      row("promoted", "root", { sidebarParent: { kind: "top_level" } }),
+      row("destination", "root"),
+      row("moved", "root", {
+        sidebarParent: { kind: "thread", threadId: ThreadId.make("destination") },
+      }),
+    ];
+    const snapshot = activeShellRowsForSubscriber(threads, true);
+    expect(snapshot.threads.map((thread) => thread.id)).toEqual([
+      "root",
+      "promoted",
+      "destination",
+      "moved",
+    ]);
+    expect(snapshot.subagentThreadIds.has("promoted")).toBe(false);
+    expect(snapshot.subagentThreadIds.has("moved")).toBe(false);
+  });
+
   it("still filters the transcript events of omitted children for a subscriber that opts in", () => {
     const threads = [row("root", null), row("idle", "root")];
     const omitted = activeShellRowsForSubscriber(threads, true);

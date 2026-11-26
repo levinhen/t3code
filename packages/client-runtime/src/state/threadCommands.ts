@@ -1,3 +1,4 @@
+import { normalizeThreadSidebarParent } from "@t3tools/contracts";
 import { CommandId, type ModelSelection, type ThreadId } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
@@ -49,6 +50,7 @@ import {
   pinThread,
   reorderPinnedThread,
   reorderActiveThread,
+  setThreadSidebarParent,
   setThreadAutoSettle,
   settleThread,
   snoozeThread,
@@ -274,6 +276,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     setAutoSettle: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:set-auto-settle",
       execute: setThreadAutoSettle,
+      scheduler,
+      concurrency,
+    }),
+    setSidebarParent: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:set-sidebar-parent",
+      execute: setThreadSidebarParent,
       scheduler,
       concurrency,
     }),
@@ -607,6 +615,26 @@ export function createThreadEnvironmentAtoms<R, E>(
     reorderPin: optimistic.wrap(commands.reorderPin, (thread, input) => ({
       ...thread,
       pinOrderKey: input.orderKey,
+    })),
+    setSidebarParent: optimistic.wrap(commands.setSidebarParent, (thread, input, now) => ({
+      ...thread,
+      sidebarParent: normalizeThreadSidebarParent(thread, input.parent),
+      ...(input.parent.kind === "thread"
+        ? {
+            pinnedAt: null,
+            pinOrderKey: null,
+            activeOrderKey: null,
+            snoozedAt: null,
+            snoozedUntil: null,
+            ...(thread.settledOverride === "settled"
+              ? {
+                  settledOverride: "active" as const,
+                  settledAt: null,
+                  unsettledAt: now,
+                }
+              : {}),
+          }
+        : {}),
     })),
     reorderActive: optimistic.wrap(commands.reorderActive, (thread, input) => ({
       ...thread,

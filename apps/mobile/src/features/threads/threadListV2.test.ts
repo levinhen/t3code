@@ -1364,6 +1364,29 @@ it("excludes subagents from navigation, search and ordering while retaining user
   ).toEqual([fork.id, root.id]);
 });
 
+it("shows promoted subagents in navigation and makes explicitly nested threads findable by search", () => {
+  const root = makeThread({ id: ThreadId.make("root"), title: "Root" });
+  const promoted = makeThread({
+    id: ThreadId.make("promoted"),
+    title: "Promoted",
+    lineage: { parentThreadId: root.id, rootThreadId: root.id, relationshipToParent: "subagent" },
+    sidebarParent: { kind: "top_level" },
+  });
+  const nested = makeThread({
+    id: ThreadId.make("nested"),
+    title: "Nested",
+    sidebarParent: { kind: "thread", threadId: root.id },
+  });
+  const threads = [root, promoted, nested];
+  const ids = (searchQuery: string, rows = threads) =>
+    buildThreadListV2Items({ threads: rows, environmentId: null, searchQuery, now: NOW }).items.map(
+      (item) => item.thread.id,
+    );
+  expect(ids("")).toEqual([promoted.id, root.id]);
+  expect(ids("Nested")).toEqual([nested.id]);
+  expect(ids("", [promoted, nested])).toEqual([nested.id, promoted.id]);
+});
+
 const BASE_MS = Date.parse(NOW);
 const isoAt = (ms: number) => new Date(ms).toISOString();
 const MINUTE_MS = 60_000;

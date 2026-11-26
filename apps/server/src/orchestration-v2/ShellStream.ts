@@ -181,7 +181,7 @@ function buildActiveShellSnapshot(input: {
 
 type ShellTrimRow = Pick<
   OrchestrationV2ThreadShell,
-  "id" | "projectId" | "lineage" | "settledOverride" | "settledAt"
+  "id" | "projectId" | "lineage" | "settledOverride" | "settledAt" | "sidebarParent"
 > & { readonly hasRemoteTasks?: boolean; readonly providerInstanceId?: ProviderInstanceId };
 
 /**
@@ -211,6 +211,8 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
   const settledTimes: Array<number> = [];
   for (const row of rows) {
     if (row.hasRemoteTasks === true) remoteTaskParentIds.add(row.id);
+    if (row.sidebarParent?.kind === "thread") subagentParentIds.add(row.sidebarParent.threadId);
+    if (row.sidebarParent != null) continue;
     if (row.lineage.relationshipToParent === "subagent") {
       subagentThreadIds.add(row.id);
       if (row.lineage.parentThreadId) {
@@ -253,11 +255,12 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
 }
 
 function hiddenChildAncestorIds(
-  threads: ReadonlyArray<Pick<OrchestrationV2ThreadShell, "lineage">>,
+  threads: ReadonlyArray<Pick<OrchestrationV2ThreadShell, "lineage" | "sidebarParent">>,
 ) {
   const ancestorIds = new Set<string>();
   for (const thread of threads) {
-    if (isListedThreadLineage(thread.lineage)) continue;
+    if (thread.sidebarParent?.kind === "thread") ancestorIds.add(thread.sidebarParent.threadId);
+    if (thread.sidebarParent != null || isListedThreadLineage(thread.lineage)) continue;
     if (thread.lineage.parentThreadId !== null) ancestorIds.add(thread.lineage.parentThreadId);
     ancestorIds.add(thread.lineage.rootThreadId);
   }
@@ -270,6 +273,7 @@ function omitIdleSubagentShellsWith(
 ): ReadonlyArray<OrchestrationV2ThreadShell> {
   return threads.filter(
     (thread) =>
+      thread.sidebarParent != null ||
       thread.lineage.relationshipToParent !== "subagent" ||
       isLiveSubagentShell(thread) ||
       facts.subagentParentIds.has(thread.id) ||
@@ -425,13 +429,15 @@ function shellSubscriberThreadIds(
   const subagents = index.filter(
     (entry) =>
       entry.lineage.relationshipToParent === "subagent" &&
-      (!options.omitIdleSubagents ||
+      (entry.sidebarParent != null ||
+        !options.omitIdleSubagents ||
         entry.mayBeLive ||
         entry.hasRemoteTasks ||
         facts.subagentParentIds.has(entry.id)),
   );
   const ancestorIds = hiddenChildAncestorIds([
     ...subagents,
+    ...index.filter((entry) => entry.sidebarParent != null),
     ...index.filter((entry) => entry.lineage.sideChat === true),
   ]);
   const keptSubagentIds = new Set(subagents.map((entry) => entry.id));
@@ -586,9 +592,14 @@ export function shouldPublishShellApplicationEvent(
 ): boolean {
   if ("aggregateKind" in stored) return true;
   const { event } = stored;
-  if (event.type === "thread.created") {
-    if (event.payload.lineage.relationshipToParent === "subagent") {
+  if (event.type === "thread.created" || event.type === "thread.sidebar-parent-updated") {
+    if (
+      event.payload.sidebarParent == null &&
+      event.payload.lineage.relationshipToParent === "subagent"
+    ) {
       subagentThreadIds.add(event.threadId);
+    } else {
+      subagentThreadIds.delete(event.threadId);
     }
     return true;
   }

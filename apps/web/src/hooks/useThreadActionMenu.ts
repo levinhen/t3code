@@ -9,6 +9,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import {
   AuthOrchestrationOperateScope,
   type ScopedThreadRef,
@@ -33,6 +34,7 @@ import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope } from "../state/session";
 import {
+  readDelegatedUnderParent,
   readEnvironmentServerConfigLoaded,
   readEnvironmentSupportsAutoSettleOptOut,
   readThreadShell,
@@ -93,6 +95,7 @@ export function useThreadActionMenu(input: {
     markThreadUnread,
     turnThreadIntoProject,
   } = useThreadActions();
+  const setSidebarParent = useOrchestrationCommand(threadEnvironment.setSidebarParent);
   const regenerateThreadTitle = useOrchestrationCommand(threadEnvironment.regenerateTitle, {
     reportFailure: false,
   });
@@ -130,11 +133,21 @@ export function useThreadActionMenu(input: {
       }
       const now = new Date();
       const configLoaded = readEnvironmentServerConfigLoaded(threadRef.environmentId);
+      const canPromote =
+        thread.archivedAt === null &&
+        thread.lineage.sideChat !== true &&
+        thread.lineage.workflowStep !== true &&
+        isShownUnderParent(
+          threadRef,
+          thread.lineage,
+          readDelegatedUnderParent(),
+          thread.sidebarParent,
+        );
       const supports = {
-        settlement: configLoaded,
+        settlement: configLoaded && !canPromote,
         autoSettleOptOut: readEnvironmentSupportsAutoSettleOptOut(threadRef.environmentId),
-        snooze: configLoaded,
-        pinning: configLoaded,
+        snooze: configLoaded && !canPromote,
+        pinning: configLoaded && !canPromote,
         titleRegeneration: configLoaded,
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
@@ -142,6 +155,7 @@ export function useThreadActionMenu(input: {
       const items = buildThreadActionMenuItems({
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         canFind: onFind !== undefined,
+        canPromote,
         branch: thread.branch ?? null,
         projectFilter: null,
         isPinned: thread.pinnedAt != null,
@@ -197,6 +211,12 @@ export function useThreadActionMenu(input: {
         }
       };
       switch (action) {
+        case "promote":
+          void setSidebarParent({
+            environmentId: threadRef.environmentId,
+            input: { threadId: threadRef.threadId, parent: { kind: "top_level" } },
+          });
+          return;
         case "find":
           onFind?.(threadRef);
           return;

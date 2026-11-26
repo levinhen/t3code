@@ -251,6 +251,7 @@ export function startThreadNotifications(
           { environmentId, threadId: rawThread.id },
           rawThread.lineage,
           delegatedUnderParent,
+          rawThread.sidebarParent,
         )
       ) {
         continue;

@@ -28,11 +28,15 @@ export function restrictBelowSidebarLabel(
   return transform.y < minimumY ? { ...transform, y: minimumY } : transform;
 }
 
+export const sidebarNestId = (threadKey: string) => `nest:${threadKey}`;
+export const sidebarNestKey = (id: string) => (id.startsWith("nest:") ? id.slice(5) : null);
+
 export function createSidebarCollisionDetection(
   isValidTarget: (id: string) => boolean,
   options: {
     items?: readonly SidebarListItem[];
     activationY?: number | null;
+    canNest?: (key: string) => boolean;
   } = {},
 ): CollisionDetection {
   const validity = new Map<string, boolean>();
@@ -40,8 +44,32 @@ export function createSidebarCollisionDetection(
   let previousPointerY = options.activationY;
   let boundarySection: "pinned" | "active" | undefined;
   return (args) => {
-    let collisions = closestCenter(args);
     const pointer = args.pointerCoordinates;
+    if (pointer && options.canNest) {
+      for (const container of args.droppableContainers) {
+        const key = sidebarNestKey(String(container.id));
+        if (key === null || key === String(args.active.id)) continue;
+        const rect =
+          container.node.current?.getBoundingClientRect() ?? args.droppableRects.get(container.id);
+        if (
+          !rect ||
+          rect.height <= 0 ||
+          pointer.x < rect.left ||
+          pointer.x > rect.right ||
+          pointer.y < rect.top + rect.height * 0.25 ||
+          pointer.y > rect.bottom - rect.height * 0.25
+        )
+          continue;
+        if (!options.canNest(key)) continue;
+        return [{ id: container.id }];
+      }
+    }
+    let collisions = closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter(
+        (container) => sidebarNestKey(String(container.id)) === null,
+      ),
+    });
     const items = options.items;
     const source = items?.find((item) => item.kind === "thread" && item.key === args.active.id);
     const boundary = args.droppableContainers

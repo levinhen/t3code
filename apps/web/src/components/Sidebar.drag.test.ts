@@ -4,6 +4,7 @@ import type { SortingStrategy } from "@dnd-kit/sortable";
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
+  sidebarNestId,
   restrictBelowSidebarLabel,
 } from "./Sidebar.drag";
 import {
@@ -99,6 +100,36 @@ describe("sidebar collision detection", () => {
       pointerCoordinates: null,
     } satisfies Parameters<CollisionDetection>[0];
   }
+
+  it("distinguishes the center nesting zone from row edges without accepting invalid parents", () => {
+    const args = collisionArgs();
+    const rect = args.droppableRects.get("blocked")!;
+    const id = sidebarNestId("blocked");
+    const withNest = {
+      ...args,
+      droppableRects: new Map([...args.droppableRects, [id, rect]]),
+      droppableContainers: [
+        ...args.droppableContainers,
+        { ...args.droppableContainers.find((row) => row.id === "blocked")!, id, key: id },
+      ],
+    };
+    const detector = createSidebarCollisionDetection(() => true, { canNest: () => true });
+    expect(
+      detector({
+        ...withNest,
+        pointerCoordinates: { x: rect.left + 10, y: rect.top + rect.height / 2 },
+      })[0]?.id,
+    ).toBe(id);
+    expect(
+      detector({ ...withNest, pointerCoordinates: { x: rect.left + 10, y: rect.top + 1 } })[0]?.id,
+    ).toBe("blocked");
+    expect(
+      createSidebarCollisionDetection(() => true, { canNest: () => false })({
+        ...withNest,
+        pointerCoordinates: { x: rect.left + 10, y: rect.top + rect.height / 2 },
+      })[0]?.id,
+    ).toBe("blocked");
+  });
 
   it.each([
     [false, sidebarMarkerId("settled-header")],

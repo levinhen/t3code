@@ -204,6 +204,25 @@ export const isListedThreadLineage = (lineage: OrchestrationV2AppThreadLineage):
   lineage.sideChat !== true &&
   lineage.workflowStep !== true;
 
+export const ThreadSidebarParent = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("top_level") }),
+  Schema.Struct({ kind: Schema.Literal("thread"), threadId: ThreadId }),
+]);
+export type ThreadSidebarParent = typeof ThreadSidebarParent.Type;
+
+export function normalizeThreadSidebarParent(
+  thread: Pick<OrchestrationV2AppThread, "lineage" | "delegatedFrom">,
+  parent: ThreadSidebarParent,
+): ThreadSidebarParent | null {
+  if (parent.kind === "top_level") {
+    return isListedThreadLineage(thread.lineage) && thread.delegatedFrom == null ? null : parent;
+  }
+  const sameEnvNatural = !isListedThreadLineage(thread.lineage)
+    ? thread.lineage.parentThreadId
+    : null;
+  return sameEnvNatural === parent.threadId ? null : parent;
+}
+
 export const OrchestrationV2ContextTransferType = Schema.Literals([
   "fork",
   "provider_handoff",
@@ -549,6 +568,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  sidebarParent: Schema.optional(Schema.NullOr(ThreadSidebarParent)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
@@ -2197,6 +2217,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.unpinned",
       "thread.pin-reordered",
       "thread.active-reordered",
+      "thread.sidebar-parent-updated",
       "thread.tags-updated",
       "thread.visited",
       "thread.marked-unread",
@@ -2468,6 +2489,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  sidebarParent: Schema.optional(Schema.NullOr(ThreadSidebarParent)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
   lastVisitedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
@@ -2517,10 +2539,14 @@ export function isLiveSubagentShell(
  * count every such thread, so the server and clients share this one rule.
  */
 export function isOlderSettledThreadShell(
-  thread: Pick<OrchestrationV2ThreadShell, "lineage" | "settledOverride" | "settledAt">,
+  thread: Pick<
+    OrchestrationV2ThreadShell,
+    "lineage" | "settledOverride" | "settledAt" | "sidebarParent"
+  >,
   beforeMs: number,
 ): boolean {
   return (
+    thread.sidebarParent == null &&
     isListedThreadLineage(thread.lineage) &&
     thread.settledOverride === "settled" &&
     thread.settledAt !== null &&
@@ -3167,6 +3193,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.unpinned",
       "thread.pin-reordered",
       "thread.active-reordered",
+      "thread.sidebar-parent-updated",
       "thread.tags-updated",
       "thread.visited",
       "thread.marked-unread",
@@ -3455,6 +3482,12 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     orderKey: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.sidebar-parent.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    parent: ThreadSidebarParent,
   }),
   Schema.Struct({
     type: Schema.Literal("thread.active.reorder"),

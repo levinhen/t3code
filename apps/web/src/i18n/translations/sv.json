@@ -2529,6 +2529,7 @@
   "6f09f810d979df20": "Det gick inte att väcka tråden",
   "e26ae432b56a2577": "Det gick inte att fästa tråden",
   "b08fe4c9d5c1ef5f": "Det gick inte att lossa tråden",
+  "81e970ec32df90c6": "Det gick inte att flytta tråden",
   "ce12d88ccfbf1221": "Det gick inte att ändra ordningen på aktiva trådar",
   "bfbb62b05e014f62": "Det gick inte att ändra ordningen på fästa trådar",
   "195a5029df504a1e": "Det gick inte att snooza tråden",
@@ -2809,6 +2810,7 @@
   "3f0d3c192663b1fe": "Kasta utkast",
   "0d8761c57796fb94": "Sök i tråden",
   "182ddc0acf67e55e": "Ny tråd på {branch}",
+  "8e69fce49bda3269": "Flytta till översta nivån",
   "47d5db2958bd01c9": "Lossa tråd",
   "f51626441b9dfc39": "Fäst tråd",
   "0b75d1fefd7710fe": "Markera tråden som ej klar",
@@ -3209,7 +3211,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "på datorn som öppnade den här sidan"]
+      "c": [
+        " ",
+        "på datorn som öppnade den här sidan"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3221,7 +3226,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· den som kör den får den här åtkomsten"]
+      "c": [
+        " ",
+        "· den som kör den får den här åtkomsten"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Godkänn bara en inloggning som du själv precis har startat.",
@@ -12092,6 +12100,7 @@
   "ef436cc0f1cee213": ", arbetar",
   "2c3bb8ccf6c38078": "Stäng meddelandet om leverantörsuppdatering",
   "3cef7762c22f5fb1": "Stäng tills leverantörsstatusen ändras",
+  "f4f470fc19837800": "Placera härunder",
   "0f90824868d6c3af": "Ny tråd ({shortcut})",
   "201317aac48d4d9f": "Rensa trådsökningen",
   "bcda2ccaa871dc46": "Ny tråd i aktuellt projekt: Shift+klick ({shortcut})",
@@ -12130,6 +12139,8 @@
   "8e800a9dfe7f9487": "Markera som klar",
   "dd46b84dfd8849bd": "Markera som ej klar",
   "5c3e33c17a1c7cf2": "Väck",
+  "2c0d725bdf1939b7": "Översta nivån",
+  "d894c4b4adba39c6": "Placera härunder",
   "f8fec76a8dea38d4": "Ej skickat utkast",
   "b0b811c800c8af57": "Lossa tråd",
   "4fca00950ff1db87": "Genererar om titeln",

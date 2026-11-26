@@ -2529,6 +2529,7 @@
   "6f09f810d979df20": "Échec du réveil du fil",
   "e26ae432b56a2577": "Échec de l’épinglage du fil",
   "b08fe4c9d5c1ef5f": "Échec du désépinglage du fil",
+  "81e970ec32df90c6": "Échec du déplacement du fil",
   "ce12d88ccfbf1221": "Échec du réordonnancement des fils actifs",
   "bfbb62b05e014f62": "Échec du réordonnancement des fils épinglés",
   "195a5029df504a1e": "Échec du report du fil",
@@ -2809,6 +2810,7 @@
   "3f0d3c192663b1fe": "Abandonner le brouillon",
   "0d8761c57796fb94": "Rechercher dans le fil",
   "182ddc0acf67e55e": "Nouveau fil sur {branch}",
+  "8e69fce49bda3269": "Déplacer au niveau supérieur",
   "47d5db2958bd01c9": "Désépingler le fil",
   "f51626441b9dfc39": "Épingler le fil",
   "0b75d1fefd7710fe": "Rouvrir le fil",
@@ -3209,7 +3211,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "sur l’ordinateur qui a ouvert cette page"]
+      "c": [
+        " ",
+        "sur l’ordinateur qui a ouvert cette page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3221,7 +3226,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· quiconque l’exécute obtient cet accès"]
+      "c": [
+        " ",
+        "· quiconque l’exécute obtient cet accès"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "N’approuvez qu’une connexion que vous venez de lancer.",
@@ -12084,6 +12092,7 @@
   "ef436cc0f1cee213": ", en cours",
   "2c3bb8ccf6c38078": "Ignorer l’avis de mise à jour du fournisseur",
   "3cef7762c22f5fb1": "Ignorer jusqu’au prochain changement de statut du fournisseur",
+  "f4f470fc19837800": "Imbriquer ici",
   "0f90824868d6c3af": "Nouveau fil ({shortcut})",
   "201317aac48d4d9f": "Effacer la recherche de fils",
   "bcda2ccaa871dc46": "Nouveau fil dans le projet actuel : Shift+clic ({shortcut})",
@@ -12122,6 +12131,8 @@
   "8e800a9dfe7f9487": "Clore",
   "dd46b84dfd8849bd": "Rouvrir",
   "5c3e33c17a1c7cf2": "Réveiller",
+  "2c0d725bdf1939b7": "Niveau supérieur",
+  "d894c4b4adba39c6": "Imbriquer ici",
   "f8fec76a8dea38d4": "Brouillon non envoyé",
   "b0b811c800c8af57": "Désépingler le fil",
   "4fca00950ff1db87": "Régénération du titre",

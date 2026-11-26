@@ -13,6 +13,7 @@ import {
 } from "./index.ts";
 import {
   latestProviderTurnForAttempt,
+  normalizeThreadSidebarParent,
   OrchestrationV2CheckpointFileSummary,
   repositoryRewindCheckpoint,
   OrchestrationV2ProviderCapabilities,
@@ -502,6 +503,35 @@ describe("thread open stats", () => {
       deletedAt: null,
     };
     const decode = Schema.decodeUnknownSync(OrchestrationV2ThreadShellJson);
+    expect(decode(shell).sidebarParent).toBeUndefined();
+    expect(decode({ ...shell, sidebarParent: { kind: "top_level" } }).sidebarParent).toEqual({
+      kind: "top_level",
+    });
+    expect(
+      decode({ ...shell, sidebarParent: { kind: "thread", threadId: "parent" } }).sidebarParent,
+    ).toEqual({ kind: "thread", threadId: "parent" });
+    expect(() => decode({ ...shell, sidebarParent: { kind: "thread" } })).toThrow();
+    const delegated = {
+      lineage: {
+        parentThreadId: null,
+        relationshipToParent: null,
+        rootThreadId: ThreadId.make("child"),
+      },
+      delegatedFrom: {
+        environmentId: EnvironmentId.make("remote"),
+        threadId: ThreadId.make("parent"),
+        title: "Remote parent",
+      },
+    };
+    expect(normalizeThreadSidebarParent(delegated, { kind: "top_level" })).toEqual({
+      kind: "top_level",
+    });
+    expect(
+      normalizeThreadSidebarParent(delegated, {
+        kind: "thread",
+        threadId: ThreadId.make("parent"),
+      }),
+    ).toEqual({ kind: "thread", threadId: ThreadId.make("parent") });
     const opens = { openedAt: 1, score: 1, picks: [{ query: "upl", at: 1 }] };
     expect(decode({ ...shell, opens }).opens).toEqual(opens);
     expect(decode({ ...shell, opens: { openedAt: "2026-10-01", score: 1 } }).opens).toBeNull();

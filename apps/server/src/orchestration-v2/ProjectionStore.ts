@@ -507,6 +507,7 @@ export interface ShellSnapshotOptions {
 /** What a shell subscriber's trims read from an active thread, without building its shell. */
 export interface ActiveShellIndexEntry extends Pick<
   OrchestrationV2ThreadShell,
+  | "sidebarParent"
   | "id"
   | "projectId"
   | "lineage"
@@ -1077,6 +1078,7 @@ export function applyToProjection(
         thread: event.payload,
       };
     // Reordering and PR refreshes preserve the orchestrator's activity timestamp.
+    case "thread.sidebar-parent-updated":
     case "thread.active-reordered":
     case "thread.tags-updated":
     case "thread.pull-request-synced":
@@ -1952,6 +1954,9 @@ export function threadShellFromProjection(
     ...(projection.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: projection.thread.activeOrderKey }),
+    ...(projection.thread.sidebarParent === undefined
+      ? {}
+      : { sidebarParent: projection.thread.sidebarParent }),
     lineage: projection.thread.lineage,
     forkedFrom: projection.thread.forkedFrom,
     activeProviderThreadId: projection.thread.activeProviderThreadId,
@@ -2269,6 +2274,9 @@ function shellFromState(input: {
     ...(input.state.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: input.state.thread.activeOrderKey }),
+    ...(input.state.thread.sidebarParent === undefined
+      ? {}
+      : { sidebarParent: input.state.thread.sidebarParent }),
     lineage: input.state.thread.lineage,
     forkedFrom: input.state.thread.forkedFrom,
     activeProviderThreadId: input.state.thread.activeProviderThreadId,
@@ -2526,6 +2534,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.pinned":
             case "thread.unpinned":
             case "thread.pin-reordered":
+            case "thread.sidebar-parent-updated":
             case "thread.active-reordered":
             case "thread.tags-updated":
             case "thread.visited":
@@ -3380,6 +3389,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             event.type !== "thread.unpinned" &&
             event.type !== "thread.pin-reordered" &&
             event.type !== "thread.active-reordered" &&
+            event.type !== "thread.sidebar-parent-updated" &&
             event.type !== "thread.tags-updated" &&
             event.type !== "thread.visited" &&
             event.type !== "thread.visit-recorded" &&
@@ -9539,7 +9549,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return rows[0]?.count ?? 0;
     }, Effect.mapError(shellSnapshotReadError));
 
-    // Migration 98 indexes these exact expressions, so the read takes them from the index instead
+    // Migration 112 indexes these exact expressions, so the read takes them from the index instead
     // of parsing every active thread's payload. Changing one here needs a matching index change.
     const indexedField = (path: string, read: "json_extract" | "json_type" = "json_extract") =>
       sql.literal(
@@ -9563,6 +9573,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly pin_order_key: string | null;
         readonly snoozed_until: string | null;
         readonly provider_instance_id: string | null;
+        readonly sidebar_parent_kind: string | null;
+        readonly sidebar_parent_id: string | null;
         readonly may_be_live: number;
         readonly has_remote_tasks: number;
       }>`
@@ -9578,6 +9590,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           ${indexedField("$.pinnedAt")} AS pinned_at,
           ${indexedField("$.pinOrderKey")} AS pin_order_key,
           ${indexedField("$.snoozedUntil")} AS snoozed_until,
+          ${indexedField("$.sidebarParent.kind")} AS sidebar_parent_kind,
+          ${indexedField("$.sidebarParent.threadId")} AS sidebar_parent_id,
           -- Only a subagent reads its payload, as a pull request link does below: a snapshot can
           -- leave it out and still name its provider.
           CASE WHEN ${indexedField("$.lineage.relationshipToParent")} = 'subagent'
@@ -9641,6 +9655,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         ...(row.provider_instance_id === null
           ? {}
           : { providerInstanceId: ProviderInstanceId.make(row.provider_instance_id) }),
+        sidebarParent:
+          row.sidebar_parent_kind === "top_level"
+            ? { kind: "top_level" }
+            : row.sidebar_parent_id !== null
+              ? { kind: "thread", threadId: ThreadId.make(row.sidebar_parent_id) }
+              : null,
         lineage: shellIndexLineage(row),
         settledOverride:
           row.settled_override === "settled" || row.settled_override === "active"
@@ -9774,6 +9794,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         FROM orchestration_v2_projection_threads t
         WHERE t.deleted_at IS NULL
           AND t.archived_at IS NULL
+          AND json_extract(t.payload_json, '$.sidebarParent.kind') IS NULL
           AND json_extract(t.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
           AND json_extract(t.payload_json, '$.lineage.sideChat') IS NOT 1
           AND json_extract(t.payload_json, '$.settledOverride') = 'settled'

@@ -2529,6 +2529,7 @@
   "6f09f810d979df20": "Failed to wake thread",
   "e26ae432b56a2577": "Failed to pin thread",
   "b08fe4c9d5c1ef5f": "Failed to unpin thread",
+  "81e970ec32df90c6": "Failed to move thread",
   "ce12d88ccfbf1221": "Failed to reorder active threads",
   "bfbb62b05e014f62": "Failed to reorder pinned threads",
   "195a5029df504a1e": "Failed to snooze thread",
@@ -2809,6 +2810,7 @@
   "3f0d3c192663b1fe": "Discard draft",
   "0d8761c57796fb94": "Find in thread",
   "182ddc0acf67e55e": "New thread on {branch}",
+  "8e69fce49bda3269": "Move to top level",
   "47d5db2958bd01c9": "Unpin thread",
   "f51626441b9dfc39": "Pin thread",
   "0b75d1fefd7710fe": "Un-settle thread",
@@ -3209,7 +3211,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "on the computer that opened this page"]
+      "c": [
+        " ",
+        "on the computer that opened this page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3221,7 +3226,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· whoever runs it gets this access"]
+      "c": [
+        " ",
+        "· whoever runs it gets this access"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -12094,6 +12102,7 @@
   "ef436cc0f1cee213": ", working",
   "2c3bb8ccf6c38078": "Dismiss provider update notice",
   "3cef7762c22f5fb1": "Dismiss until provider status changes",
+  "f4f470fc19837800": "Nest here",
   "0f90824868d6c3af": "New thread ({shortcut})",
   "201317aac48d4d9f": "Clear thread search",
   "bcda2ccaa871dc46": "New thread in current project: Shift+click ({shortcut})",
@@ -12132,6 +12141,8 @@
   "8e800a9dfe7f9487": "Settle",
   "dd46b84dfd8849bd": "Un-settle",
   "5c3e33c17a1c7cf2": "Wake",
+  "2c0d725bdf1939b7": "Top level",
+  "d894c4b4adba39c6": "Nest here",
   "f8fec76a8dea38d4": "Unsent draft",
   "b0b811c800c8af57": "Unpin thread",
   "4fca00950ff1db87": "Regenerating title",

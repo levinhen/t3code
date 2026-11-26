@@ -672,6 +672,116 @@ describe("sidebar subagent tree", () => {
     });
   });
 
+  it("offers promotion for a nested thread without changing its runtime lineage", async () => {
+    const activeProject = project("active");
+    const root = makeThreadFixture({
+      id: ThreadId.make("promote-root"),
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+      title: "Promotion root",
+    });
+    const child = makeThreadFixture({
+      id: ThreadId.make("promote-child"),
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+      title: "Promotion child",
+      lineage: { parentThreadId: root.id, rootThreadId: root.id, relationshipToParent: "subagent" },
+    });
+    const target = makeThreadFixture({
+      id: ThreadId.make("target-root"),
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+      title: "Nesting target",
+    });
+    const rootRef = scopeThreadRef(root.environmentId, root.id);
+    const show = vi.fn().mockResolvedValue("promote");
+    const mutation = vi.fn().mockResolvedValue({ _tag: "Success" });
+    vi.mocked(readLocalApi).mockReturnValue({ contextMenu: { show } } as unknown as LocalApi);
+    vi.mocked(readEnvironmentScope).mockReturnValue(true);
+    vi.mocked(useEnvironmentScope).mockReturnValue(true);
+    vi.mocked(useOrchestrationCommand).mockReturnValue(mutation);
+    vi.mocked(useProjects).mockReturnValue([activeProject]);
+    vi.mocked(useQuietThreadShells).mockReturnValue([root, child, target]);
+    vi.mocked(useConnectedEnvironmentIds).mockReturnValue([activeProject.environmentId]);
+    vi.mocked(useServerConfigs).mockReturnValue(
+      new Map([
+        [
+          activeProject.environmentId,
+          {
+            scratchWorkspaceRoot: null,
+            shellThreadFamilies: false,
+            environment: { capabilities: {} },
+          } as unknown as EnvironmentServerConfig,
+        ],
+      ]),
+    );
+    vi.mocked(useThreadRouteTarget).mockReturnValue({ kind: "server", threadRef: rootRef });
+    vi.mocked(useHandleNewThread).mockReturnValue({
+      activeDraftThread: null,
+      activeThread: null,
+      defaultProjectRef: scopeProjectRef(root.environmentId, root.projectId),
+      defaultProjectFallbackReady: true,
+      handleNewThread: vi.fn().mockResolvedValue(null),
+      routeDraftId: null,
+      routeThreadRef: rootRef,
+    });
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+    await expect.element(screen.getByText(root.title)).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("sidebar-subagent-tree-toggle"));
+    const row = screen.getByTestId("sidebar-subagent-row");
+    await expect.element(row).toBeInTheDocument();
+    await act(() =>
+      row
+        .element()
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
+    );
+    await vi.waitFor(() =>
+      expect(mutation).toHaveBeenCalledWith({
+        environmentId: child.environmentId,
+        input: { threadId: child.id, parent: { kind: "top_level" } },
+      }),
+    );
+    expect(show.mock.calls[0]?.[0]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "promote" })]),
+    );
+    const destination = screen.getByText(target.title).element().closest("[data-sidebar-row]")!;
+    const sourceBounds = row.element().getBoundingClientRect();
+    const destBounds = destination.getBoundingClientRect();
+    const pointer = (type: string, x: number, y: number) =>
+      new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 1,
+        isPrimary: true,
+        button: 0,
+        buttons: type === "pointerup" ? 0 : 1,
+        clientX: x,
+        clientY: y,
+      });
+    const x = sourceBounds.left + sourceBounds.width / 2;
+    const y = sourceBounds.top + sourceBounds.height / 2;
+    const targetX = destBounds.left + destBounds.width / 2;
+    const targetY = destBounds.top + destBounds.height / 2;
+    using _release = {
+      [Symbol.dispose]: () => document.dispatchEvent(pointer("pointerup", -100, 100)),
+    };
+    await act(() => row.element().dispatchEvent(pointer("pointerdown", x, y)));
+    await act(() => document.dispatchEvent(pointer("pointermove", x + 12, y)));
+    await act(() => document.dispatchEvent(pointer("pointermove", targetX, targetY)));
+    await expect.element(screen.getByText("Nest here")).toBeInTheDocument();
+    await act(() => document.dispatchEvent(pointer("pointerup", targetX, targetY)));
+    await vi.waitFor(() =>
+      expect(mutation).toHaveBeenCalledWith({
+        environmentId: child.environmentId,
+        input: { threadId: child.id, parent: { kind: "thread", threadId: target.id } },
+      }),
+    );
+  });
+
   it("counts the idle children the shell left out without loading them", async () => {
     const activeProject = project("active");
     const rootThread = makeThreadFixture({

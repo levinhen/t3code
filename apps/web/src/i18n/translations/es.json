@@ -2529,6 +2529,7 @@
   "6f09f810d979df20": "No se pudo reactivar el hilo",
   "e26ae432b56a2577": "No se pudo fijar el hilo",
   "b08fe4c9d5c1ef5f": "No se pudo desfijar el hilo",
+  "81e970ec32df90c6": "No se pudo mover el hilo",
   "ce12d88ccfbf1221": "No se pudieron reordenar los hilos activos",
   "bfbb62b05e014f62": "No se pudieron reordenar los hilos fijados",
   "195a5029df504a1e": "No se pudo posponer el hilo",
@@ -2809,6 +2810,7 @@
   "3f0d3c192663b1fe": "Descartar borrador",
   "0d8761c57796fb94": "Buscar en el hilo",
   "182ddc0acf67e55e": "Nuevo hilo en {branch}",
+  "8e69fce49bda3269": "Mover al nivel superior",
   "47d5db2958bd01c9": "Desfijar hilo",
   "f51626441b9dfc39": "Fijar hilo",
   "0b75d1fefd7710fe": "Quitar hilo de resueltos",
@@ -3209,7 +3211,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "en el ordenador que abrió esta página"]
+      "c": [
+        " ",
+        "en el ordenador que abrió esta página"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3221,7 +3226,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· quien lo ejecute obtiene este acceso"]
+      "c": [
+        " ",
+        "· quien lo ejecute obtiene este acceso"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Aprueba solo un inicio de sesión que acabes de iniciar.",
@@ -12079,6 +12087,7 @@
   "ef436cc0f1cee213": ", en curso",
   "2c3bb8ccf6c38078": "Descartar aviso de actualización del proveedor",
   "3cef7762c22f5fb1": "Descartar hasta que cambie el estado del proveedor",
+  "f4f470fc19837800": "Anidar aquí",
   "0f90824868d6c3af": "Nuevo hilo ({shortcut})",
   "201317aac48d4d9f": "Borrar búsqueda de hilos",
   "bcda2ccaa871dc46": "Nuevo hilo en el proyecto actual: Shift+clic ({shortcut})",
@@ -12117,6 +12126,8 @@
   "8e800a9dfe7f9487": "Resolver",
   "dd46b84dfd8849bd": "Quitar de resueltos",
   "5c3e33c17a1c7cf2": "Reactivar",
+  "2c0d725bdf1939b7": "Nivel superior",
+  "d894c4b4adba39c6": "Anidar aquí",
   "f8fec76a8dea38d4": "Borrador sin enviar",
   "b0b811c800c8af57": "Desfijar hilo",
   "4fca00950ff1db87": "Regenerando título",

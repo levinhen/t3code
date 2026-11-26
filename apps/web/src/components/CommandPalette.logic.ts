@@ -421,6 +421,7 @@ export type BuildThreadActionItemsThread = Pick<
   | "environmentId"
   | "id"
   | "lineage"
+  | "sidebarParent"
   | "modelSelection"
   | "projectId"
   | "runtime"
@@ -462,6 +463,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
         { environmentId: thread.environmentId, threadId: thread.id },
         thread.lineage,
         delegatedUnderParent,
+        thread.sidebarParent,
       ),
   );
 

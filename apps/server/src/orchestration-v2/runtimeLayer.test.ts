@@ -3774,6 +3774,55 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       });
       assert.equal((yield* orchestrator.getThreadProjection(threadId)).thread.activeOrderKey, "a0");
 
+      const sidebarTargetId = ThreadId.make("runtime-layer-sidebar-parent");
+      yield* orchestrator.dispatch({
+        ...create,
+        commandId: CommandId.make("sidebar-target-create"),
+        threadId: sidebarTargetId,
+      });
+      const originalLineage = (yield* orchestrator.getThreadProjection(threadId)).thread.lineage;
+      yield* orchestrator.dispatch({
+        type: "thread.sidebar-parent.set",
+        commandId: CommandId.make("sidebar-nest"),
+        threadId,
+        parent: { kind: "thread", threadId: sidebarTargetId },
+      });
+      const nested = (yield* orchestrator.getThreadProjection(threadId)).thread;
+      assert.deepEqual(nested.sidebarParent, { kind: "thread", threadId: sidebarTargetId });
+      assert.deepEqual(nested.lineage, originalLineage);
+      assert.isNull(nested.activeOrderKey);
+      assert.deepEqual(
+        (yield* orchestrator.getShellSnapshot()).threads.find((row) => row.id === threadId)
+          ?.sidebarParent,
+        nested.sidebarParent,
+      );
+      const cycle = yield* orchestrator
+        .dispatch({
+          type: "thread.sidebar-parent.set",
+          commandId: CommandId.make("sidebar-cycle"),
+          threadId: sidebarTargetId,
+          parent: { kind: "thread", threadId },
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(cycle, Orchestrator.OrchestratorDispatchError);
+      yield* orchestrator.dispatch({
+        type: "thread.sidebar-parent.set",
+        commandId: CommandId.make("sidebar-promote"),
+        threadId,
+        parent: { kind: "top_level" },
+      });
+      assert.isNull((yield* orchestrator.getThreadProjection(threadId)).thread.sidebarParent);
+      yield* orchestrator.dispatch({
+        type: "thread.active.reorder",
+        commandId: CommandId.make("sidebar-restore-order"),
+        threadId,
+        orderKey: "a0",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("sidebar-target-delete"),
+        threadId: sidebarTargetId,
+      });
       const shellOf = (shell: Pick<OrchestrationV2ShellSnapshot, "threads">) =>
         shell.threads.find((thread) => thread.id === threadId)!;
       const untaggedShell = shellOf(yield* orchestrator.getShellSnapshot());

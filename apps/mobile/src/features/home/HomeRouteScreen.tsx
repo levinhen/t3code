@@ -11,7 +11,10 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
 
 import { useProjects } from "../../state/entities";
-import { steadyNavigationThreadShellsAtom } from "../../state/threads";
+import {
+  steadyNavigationThreadShellsAtom,
+  steadySearchThreadShellsAtom,
+} from "../../state/threads";
 import { useLaunchingThreads, usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
@@ -52,9 +55,6 @@ export function HomeRouteScreen() {
   const projects = useProjects();
   // Stop rebuilding the streaming thread list while Thread covers Home.
   const visible = useHomeRouteVisible();
-  const threads = useLaunchingThreads(
-    useAtomValueWhileVisible(steadyNavigationThreadShellsAtom, visible),
-  );
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
@@ -65,6 +65,12 @@ export function HomeRouteScreen() {
     Platform.OS === "android"
       ? primarySidebarSearchQuery
       : (workspace?.state.tabs.threads.query ?? localSearchQuery);
+  const threads = useLaunchingThreads(
+    useAtomValueWhileVisible(
+      searchQuery.trim() ? steadySearchThreadShellsAtom : steadyNavigationThreadShellsAtom,
+      visible,
+    ),
+  );
   const setSearchQuery = (query: string) => {
     if (Platform.OS === "android") setPrimarySidebarSearchQuery(query);
     else if (workspace) workspace.dispatch({ type: "query", query, tab: "threads" });

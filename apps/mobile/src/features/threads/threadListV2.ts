@@ -33,7 +33,11 @@ import {
   sortPinnedThreadsByOrderKey,
   sortSettledThreads,
 } from "@t3tools/client-runtime/state/thread-sort";
-import { isListedThreadLineage, type EnvironmentId, type ProjectId } from "@t3tools/contracts";
+import {
+  isShownUnderParent,
+  sidebarChildrenWithListedParents,
+} from "@t3tools/client-runtime/state/threads";
+import { type EnvironmentId, type ProjectId } from "@t3tools/contracts";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import type { MenuAction } from "@react-native-menu/menu";
 
@@ -380,8 +384,18 @@ export function getThreadListV2OrderedSection(input: {
   readonly queuedThreadKeys?: ReadonlySet<string>;
 }): EnvironmentThreadShell[] {
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
+  const underParent = sidebarChildrenWithListedParents(input.threads);
   const threads = input.threads.filter((thread) => {
-    if (thread.archivedAt !== null || !isListedThreadLineage(thread.lineage)) return false;
+    if (
+      thread.archivedAt !== null ||
+      isShownUnderParent(
+        { environmentId: thread.environmentId, threadId: thread.id },
+        thread.lineage,
+        underParent,
+        thread.sidebarParent,
+      )
+    )
+      return false;
     if (
       (input.settlementEnvironmentIds?.has(thread.environmentId) ?? true) &&
       thread.settledOverride === "settled" &&
@@ -764,10 +778,17 @@ export function buildThreadListV2Items(input: {
   const snoozed: EnvironmentThreadShell[] = [];
   let nextSnoozeWakeAt: string | null = null;
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
+  const underParent = sidebarChildrenWithListedParents(input.threads);
   const listedThreads = input.threads.filter(
     (thread) =>
       thread.archivedAt === null &&
-      isListedThreadLineage(thread.lineage) &&
+      ((query.length > 0 && thread.sidebarParent?.kind === "thread") ||
+        !isShownUnderParent(
+          { environmentId: thread.environmentId, threadId: thread.id },
+          thread.lineage,
+          underParent,
+          thread.sidebarParent,
+        )) &&
       (input.environmentId === null || thread.environmentId === input.environmentId) &&
       (projectKeys === null || projectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );

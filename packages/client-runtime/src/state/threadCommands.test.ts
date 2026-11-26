@@ -418,6 +418,18 @@ describe("remote thread lifecycle commands", () => {
     ["setAutoSettle", { enabled: false }, { autoSettleDisabledAt: expect.any(Object) }],
     ["reorderPin", { orderKey: "b" }, { pinOrderKey: "b" }],
     ["reorderActive", { orderKey: "b" }, { activeOrderKey: "b" }],
+    [
+      "setSidebarParent",
+      { parent: { kind: "thread", threadId: ThreadId.make("other") } },
+      {
+        sidebarParent: { kind: "thread", threadId: "other" },
+        pinnedAt: null,
+        pinOrderKey: null,
+        activeOrderKey: null,
+        snoozedUntil: null,
+        settledOverride: "active",
+      },
+    ],
   ] as const;
 
   it.effect.each(actions)(
@@ -431,13 +443,16 @@ describe("remote thread lifecycle commands", () => {
           threads: [
             {
               ...SNAPSHOT.threads[0]!,
-              ...(action === "unsettle" || action === "pin"
+              ...(action === "unsettle" || action === "pin" || action === "setSidebarParent"
                 ? { settledOverride: "settled" as const, settledAt: NOW }
                 : {}),
-              ...(action === "unsnooze" || action === "settle" || action === "pin"
+              ...(action === "unsnooze" ||
+              action === "settle" ||
+              action === "pin" ||
+              action === "setSidebarParent"
                 ? { snoozedUntil: FUTURE, snoozedAt: NOW }
                 : {}),
-              ...(action === "unpin" || action === "settle"
+              ...(action === "unpin" || action === "settle" || action === "setSidebarParent"
                 ? { pinnedAt: NOW, pinOrderKey: "a" }
                 : {}),
             },
@@ -455,6 +470,7 @@ describe("remote thread lifecycle commands", () => {
                 enabled: false,
                 orderKey: "a",
                 snoozedUntil: "2099-01-01T00:00:00.000Z",
+                parent: { kind: "thread", threadId: ThreadId.make("other") },
                 ...input,
               },
             }),

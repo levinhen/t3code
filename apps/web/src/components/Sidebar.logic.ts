@@ -257,13 +257,18 @@ export function resolveSidebarDropTarget(
   items: readonly SidebarListItem[],
   activeKey: string,
   overId: string,
+  insertAfter = false,
 ): SidebarDropTarget | null {
   const activeIndex = items.findIndex((item) => sidebarListItemId(item) === activeKey);
   const overIndex = items.findIndex((item) => sidebarListItemId(item) === overId);
   if (activeIndex === -1 || overIndex === -1 || items[activeIndex]?.kind !== "thread") return null;
   const moved = items.filter((_, index) => index !== activeIndex);
-  moved.splice(overIndex, 0, items[activeIndex]!);
-  const section = sectionAtSidebarSlot(moved, overIndex);
+  const insertionIndex =
+    insertAfter && activeIndex > overIndex && items[overIndex]?.kind === "thread"
+      ? overIndex + 1
+      : overIndex;
+  moved.splice(insertionIndex, 0, items[activeIndex]!);
+  const section = sectionAtSidebarSlot(moved, insertionIndex);
   if (section === "working" || section === "snoozed") return null;
   const pinnedOrder: string[] = [];
   const activeOrder: string[] = [];
@@ -306,13 +311,20 @@ type SidebarThreadDropPlan =
     }
   | { readonly kind: "settle" };
 
-export type SidebarDropVerb = "pin" | "unpin" | "settle" | "unsettle" | "wake";
+export type SidebarDropVerb = "pin" | "unpin" | "settle" | "unsettle" | "wake" | "promote";
 
 export function resolveSidebarDropVerb(
   from: SidebarSection,
   to: SidebarSection | null,
+  promoting = false,
 ): SidebarDropVerb | null {
-  if (to === null || to === from || to === "working" || to === "snoozed") return null;
+  if (to === null || to === "working" || to === "snoozed") return null;
+  if (promoting) {
+    if (to === "pinned") return "pin";
+    if (to === "settled") return "settle";
+    return "promote";
+  }
+  if (to === from) return null;
   if (to === "pinned") return "pin";
   if (to === "settled") return "settle";
   if (from === "pinned") return "unpin";
@@ -383,6 +395,7 @@ export function planSidebarThreadDrop(input: {
   readonly activeKeysById: ReadonlyMap<string, string | null | undefined>;
   readonly activeReorderableKeys?: ReadonlySet<string>;
   readonly activeTimeOrdered?: boolean;
+  readonly promoting?: boolean;
 }): SidebarThreadDropPlan {
   const {
     activeKey,
@@ -439,7 +452,7 @@ export function planSidebarThreadDrop(input: {
   switch (target.section) {
     case "active": {
       if (input.activeTimeOrdered) {
-        return activeSection === "active"
+        return activeSection === "active" && !input.promoting
           ? { kind: "none" }
           : {
               kind: "move-active",
@@ -470,7 +483,9 @@ export function planSidebarThreadDrop(input: {
       };
     }
     case "settled":
-      return activeSection === "settled" ? { kind: "none" } : { kind: "settle" };
+      return activeSection === "settled" && !input.promoting
+        ? { kind: "none" }
+        : { kind: "settle" };
     case "pinned": {
       const order = target.pinnedOrder;
       if (
@@ -595,7 +610,10 @@ export async function deleteSelectedThreadEntries<
  * the sidebar lists, by thread key; they show under that thread, as subagents do.
  */
 export function filterSidebarV2VisibleThreads<
-  T extends Pick<SidebarThreadSummary, "archivedAt" | "environmentId" | "id" | "lineage"> & {
+  T extends Pick<
+    SidebarThreadSummary,
+    "archivedAt" | "environmentId" | "id" | "lineage" | "sidebarParent"
+  > & {
     projectId: string;
   },
 >(
@@ -610,6 +628,7 @@ export function filterSidebarV2VisibleThreads<
         { environmentId: thread.environmentId, threadId: thread.id },
         thread.lineage,
         delegatedUnderParent,
+        thread.sidebarParent,
       ) &&
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
@@ -1336,7 +1355,7 @@ export function resolveThreadStatusPill(input: {
 export function getFallbackThreadIdAfterDelete<
   T extends Pick<
     Thread,
-    "id" | "projectId" | "createdAt" | "updatedAt" | "settledOverride" | "lineage"
+    "id" | "projectId" | "createdAt" | "updatedAt" | "settledOverride" | "lineage" | "sidebarParent"
   > &
     ThreadSortInput &
     ThreadSnoozeShell &
@@ -1369,6 +1388,7 @@ export function getFallbackThreadIdAfterDelete<
             { environmentId: thread.environmentId, threadId: thread.id },
             thread.lineage,
             delegatedUnderParent,
+            thread.sidebarParent,
           ),
       ),
       sortOrder,
@@ -1458,7 +1478,7 @@ export function sortLogicalProjectsForSidebar<
 export function sortSidebarV2ProjectGroups<
   TProject extends LogicalSidebarProject,
   TThread extends ScopedSidebarThread &
-    Pick<SidebarThreadSummary, "environmentId" | "id" | "lineage">,
+    Pick<SidebarThreadSummary, "environmentId" | "id" | "lineage" | "sidebarParent">,
 >(
   projects: readonly TProject[],
   threads: readonly TThread[],

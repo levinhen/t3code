@@ -38,14 +38,25 @@ export function createOptimisticThreadLifecycle(
         byThread.set(update.threadId, updates);
       }
       if (byThread.size === 0) return snapshot;
+      const threads = snapshot.threads.map((thread) =>
+        (byThread.get(thread.id) ?? []).reduce((current, update) => update.apply(current), thread),
+      );
+      const moved = new Set(
+        threads
+          .filter((thread) => byThread.has(thread.id) && thread.sidebarParent != null)
+          .map((thread) => thread.id),
+      );
       return {
         ...snapshot,
-        threads: snapshot.threads.map((thread) =>
-          (byThread.get(thread.id) ?? []).reduce(
-            (current, update) => update.apply(current),
-            thread,
-          ),
-        ),
+        threads,
+        ...(snapshot.idleSubagents === undefined || moved.size === 0
+          ? {}
+          : {
+              idleSubagents: snapshot.idleSubagents.flatMap((entry) => {
+                const threadIds = entry.threadIds.filter((id) => !moved.has(id));
+                return threadIds.length === 0 ? [] : [{ ...entry, threadIds }];
+              }),
+            }),
       };
     }),
   );

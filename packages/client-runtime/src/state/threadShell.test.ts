@@ -20,6 +20,7 @@ import {
   childThreadInputsTitle,
   createEnvironmentThreadShellAtoms,
   resolveListedAncestorThreadRef,
+  sidebarChildrenWithListedParents,
 } from "./threadShell.ts";
 
 const environmentId = EnvironmentId.make("environment-v2");
@@ -767,6 +768,35 @@ describe("resolveListedAncestorThreadRef", () => {
     const loopA = subagentOf("thread-loop-a", ThreadId.make("thread-loop-b"));
     const loopB = subagentOf("thread-loop-b", loopA.id);
     expect(rowOf(loopA.id, environmentId, [loopA, loopB])).toEqual(ref(environmentId, loopA.id));
+  });
+
+  it("reveals overridden parents, promoted children, and children whose display parent vanished", () => {
+    const root = listed("root");
+    const child = subagentOf("child", root.id);
+    const target = listed("target");
+    const promoted: Thread = { ...child, sidebarParent: { kind: "top_level" } };
+    const moved: Thread = { ...child, sidebarParent: { kind: "thread", threadId: target.id } };
+    expect(rowOf(child.id, environmentId, [root, promoted])).toEqual(ref(environmentId, child.id));
+    expect(rowOf(child.id, environmentId, [root, target, moved])).toEqual(
+      ref(environmentId, target.id),
+    );
+    expect(rowOf(child.id, environmentId, [root, moved])).toEqual(ref(environmentId, child.id));
+    expect(
+      rowOf(child.id, environmentId, [
+        root,
+        { ...target, archivedAt: "2026-01-01T00:00:00Z" },
+        moved,
+      ]),
+    ).toEqual(ref(environmentId, child.id));
+    const cycleA: Thread = {
+      ...listed("cycle-a"),
+      sidebarParent: { kind: "thread", threadId: ThreadId.make("cycle-b") },
+    };
+    const cycleB: Thread = {
+      ...listed("cycle-b"),
+      sidebarParent: { kind: "thread", threadId: cycleA.id },
+    };
+    expect(sidebarChildrenWithListedParents([cycleA, cycleB]).size).toBe(0);
   });
 
   it("maps an open task a linked environment delegated to its listed parent", () => {

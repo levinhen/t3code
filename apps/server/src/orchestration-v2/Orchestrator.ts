@@ -1,3 +1,4 @@
+import { normalizeThreadSidebarParent } from "@t3tools/contracts";
 import type {
   OrchestrationV2ThreadLinkMetadata,
   GuestShareId,
@@ -659,6 +660,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.unpin":
     case "thread.pin.reorder":
     case "thread.active.reorder":
+    case "thread.sidebar-parent.set":
     case "thread.tag.set":
     case "thread.visit":
     case "thread.mark-unread":
@@ -4465,6 +4467,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.unpin"
           | "thread.pin.reorder"
           | "thread.tag.set"
+          | "thread.sidebar-parent.set"
           | "thread.active.reorder"
           | "thread.mark-unread"
           | "thread.metadata.update"
@@ -4628,6 +4631,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         command.type === "thread.unpin" ||
         command.type === "thread.pin.reorder" ||
         command.type === "thread.active.reorder" ||
+        command.type === "thread.sidebar-parent.set" ||
         command.type === "thread.pull-request.sync") &&
       thread.archivedAt !== null
     ) {
@@ -4636,6 +4640,43 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         commandType: command.type,
         cause: `Thread ${command.threadId} is archived.`,
       });
+    }
+    if (command.type === "thread.sidebar-parent.set") {
+      const invalid = (candidate: typeof thread) =>
+        candidate.deletedAt !== null ||
+        candidate.archivedAt !== null ||
+        candidate.lineage.sideChat === true ||
+        candidate.lineage.workflowStep === true;
+      const reject = () =>
+        new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Invalid sidebar parent or cycle.",
+        });
+      if (invalid(thread)) return yield* reject();
+      if (command.parent.kind === "thread") {
+        const seen = new Set([thread.id]);
+        let parentId: ThreadId | null = command.parent.threadId;
+        while (parentId !== null) {
+          if (seen.has(parentId)) return yield* reject();
+          seen.add(parentId);
+          const parent: OrchestrationV2AppThread | null = yield* projectionStore
+            .findThread(parentId)
+            .pipe(mapDispatchError(command));
+          if (parent === null || invalid(parent)) {
+            if (parentId === command.parent.threadId) return yield* reject();
+            break;
+          }
+          parentId =
+            parent.sidebarParent?.kind === "thread"
+              ? parent.sidebarParent.threadId
+              : parent.sidebarParent?.kind === "top_level"
+                ? null
+                : parent.lineage.relationshipToParent === "subagent"
+                  ? parent.lineage.parentThreadId
+                  : null;
+        }
+      }
     }
     // Reject reorder after unpin so a raced request cannot restore a cleared pin.
     if (command.type === "thread.pin.reorder" && thread.pinnedAt == null) {
@@ -5168,6 +5209,28 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: thread.updatedAt,
           };
         }
+        case "thread.sidebar-parent.set": {
+          return {
+            ...thread,
+            sidebarParent: normalizeThreadSidebarParent(thread, command.parent),
+            ...(command.parent.kind === "thread"
+              ? {
+                  pinnedAt: null,
+                  pinOrderKey: null,
+                  activeOrderKey: null,
+                  snoozedAt: null,
+                  snoozedUntil: null,
+                  ...(thread.settledOverride === "settled"
+                    ? {
+                        settledOverride: "active" as const,
+                        settledAt: null,
+                        unsettledAt: now,
+                      }
+                    : {}),
+                }
+              : {}),
+          };
+        }
         case "thread.tag.set": {
           const current = thread.tags ?? [];
           return {
@@ -5645,6 +5708,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.pin-reordered" as const;
         case "thread.active.reorder":
           return "thread.active-reordered" as const;
+        case "thread.sidebar-parent.set":
+          return "thread.sidebar-parent-updated" as const;
         case "thread.tag.set":
           return "thread.tags-updated" as const;
         case "thread.mark-unread":
@@ -16137,6 +16202,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.unpin":
       case "thread.pin.reorder":
       case "thread.active.reorder":
+      case "thread.sidebar-parent.set":
       case "thread.tag.set":
       case "thread.mark-unread":
       case "thread.pull-request.link":

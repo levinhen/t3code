@@ -1,5 +1,8 @@
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { IdleSubagentChildren } from "@t3tools/client-runtime/state/threads";
+import {
+  sidebarChildrenWithListedParents,
+  type IdleSubagentChildren,
+} from "@t3tools/client-runtime/state/threads";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -7,6 +10,7 @@ import { makeThreadFixture, type ThreadFixtureOverrides } from "../../test-fixtu
 import {
   buildSidebarChildThreadsByParent,
   collectVisibleSidebarDescendants,
+  canNestSidebarThread,
   summarizeSidebarSubtree,
 } from "./subagentTree";
 
@@ -115,6 +119,38 @@ describe("sidebar subagent tree", () => {
       providerInstanceIds: [codex],
       runningProviderInstanceIds: [],
     });
+  });
+
+  it("moves display subtrees independently of lineage and rejects a descendant as a parent", () => {
+    const root = makeThread({ id: ThreadId.make("root") });
+    const target = makeThread({ id: ThreadId.make("target") });
+    const child = makeThread({
+      id: ThreadId.make("child"),
+      sidebarParent: { kind: "thread", threadId: target.id },
+      lineage: { parentThreadId: root.id, rootThreadId: root.id, relationshipToParent: "subagent" },
+    });
+    const grandchild = makeThread({
+      id: ThreadId.make("grandchild"),
+      lineage: {
+        parentThreadId: child.id,
+        rootThreadId: root.id,
+        relationshipToParent: "subagent",
+      },
+    });
+    const promoted = makeThread({
+      id: ThreadId.make("promoted"),
+      sidebarParent: { kind: "top_level" },
+      lineage: { parentThreadId: root.id, rootThreadId: root.id, relationshipToParent: "subagent" },
+    });
+    const rows = [root, target, child, grandchild, promoted];
+    const grouped = buildSidebarChildThreadsByParent(rows, sidebarChildrenWithListedParents(rows));
+    const key = (thread: typeof root) =>
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+    expect(grouped.get(key(root))).toBeUndefined();
+    expect(grouped.get(key(target))).toEqual([child]);
+    expect(grouped.get(key(child))).toEqual([grandchild]);
+    expect(canNestSidebarThread(target, grandchild, grouped)).toBe(false);
+    expect(canNestSidebarThread(child, root, grouped)).toBe(true);
   });
 
   it("defaults collapsed when idle, expands on explicit toggle, and auto-expands when a descendant is active or running", () => {

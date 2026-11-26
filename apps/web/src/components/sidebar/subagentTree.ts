@@ -1,6 +1,10 @@
+import { threadKey } from "@t3tools/client-runtime/state/entities";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { IdleSubagentChildren } from "@t3tools/client-runtime/state/threads";
-import { isListedThreadLineage, type ProviderInstanceId } from "@t3tools/contracts";
+import {
+  sidebarParentThreadRef,
+  type IdleSubagentChildren,
+} from "@t3tools/client-runtime/state/threads";
+import { type ProviderInstanceId } from "@t3tools/contracts";
 
 import type { SidebarThreadSummary } from "../../types";
 import { resolveSidebarThreadStatus } from "../Sidebar.logic";
@@ -13,6 +17,7 @@ export type SidebarTreeThread = Pick<
   | "createdAt"
   | "modelSelection"
   | "lineage"
+  | "sidebarParent"
   | "delegatedFrom"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
@@ -76,23 +81,23 @@ function unloadedIdleChildren<T extends SidebarTreeThread>(
 function resolveSidebarTreeParentKey(
   thread: Pick<
     SidebarTreeThread,
-    "id" | "environmentId" | "archivedAt" | "lineage" | "delegatedFrom"
+    "id" | "environmentId" | "archivedAt" | "lineage" | "delegatedFrom" | "sidebarParent"
   >,
   delegatedUnderParent: ReadonlySet<string>,
 ): string | null {
   if (thread.archivedAt !== null) return null;
-  if (!isListedThreadLineage(thread.lineage)) {
-    if (thread.lineage.parentThreadId === null) return null;
-    return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.lineage.parentThreadId));
-  }
-  if (thread.delegatedFrom != null) {
-    const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-    if (!delegatedUnderParent.has(key)) return null;
-    return scopedThreadKey(
-      scopeThreadRef(thread.delegatedFrom.environmentId, thread.delegatedFrom.threadId),
-    );
-  }
-  return null;
+  const parent = sidebarParentThreadRef(thread);
+  if (parent === null) return null;
+  if (
+    (thread.sidebarParent != null ||
+      (thread.delegatedFrom != null && thread.lineage.relationshipToParent !== "subagent")) &&
+    !delegatedUnderParent.has(
+      threadKey({ environmentId: thread.environmentId, threadId: thread.id }),
+    ) &&
+    !delegatedUnderParent.has(treeThreadKey(thread))
+  )
+    return null;
+  return scopedThreadKey(parent);
 }
 
 function compareSidebarChildThreads<T extends Pick<SidebarTreeThread, "createdAt" | "id">>(
@@ -305,4 +310,33 @@ export function collectVisibleSidebarDescendants<T extends SidebarTreeThread>(
   walk(rootKey, 1);
 
   return { summary, isExpanded: true, rows, familyKeys };
+}
+
+export function canNestSidebarThread<T extends SidebarTreeThread>(
+  source: T,
+  target: T,
+  childrenByParent: ReadonlyMap<string, readonly T[]>,
+): boolean {
+  if (
+    source.environmentId !== target.environmentId ||
+    source.id === target.id ||
+    [source, target].some(
+      (thread) =>
+        thread.archivedAt !== null ||
+        thread.lineage.sideChat === true ||
+        thread.lineage.workflowStep === true,
+    )
+  )
+    return false;
+  const targetKey = treeThreadKey(target);
+  const stack = [treeThreadKey(source)];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const key = stack.pop()!;
+    if (key === targetKey) return false;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    for (const child of childrenByParent.get(key) ?? []) stack.push(treeThreadKey(child));
+  }
+  return true;
 }

@@ -1,3 +1,4 @@
+import type { ThreadSidebarParent } from "@t3tools/contracts";
 import { msg } from "gt-i18n";
 import { translatableMessage } from "../errors/translatable.ts";
 import { remapComposerContextAttachments } from "@t3tools/shared/composerContextReferences";
@@ -637,6 +638,17 @@ export const reorderPinnedThread = Effect.fn("EnvironmentCommands.reorderPinnedT
     orderKey: input.orderKey,
   });
 });
+
+export const setThreadSidebarParent = Effect.fn("EnvironmentCommands.setThreadSidebarParent")(
+  function* (input: ThreadCommandInput & { readonly parent: ThreadSidebarParent }) {
+    return yield* dispatch({
+      type: "thread.sidebar-parent.set",
+      commandId: yield* allocateCommandId(input),
+      threadId: input.threadId,
+      parent: input.parent,
+    });
+  },
+);
 
 export const reorderActiveThread = Effect.fn("EnvironmentCommands.reorderActiveThread")(function* (
   input: ReorderActiveThreadInput,

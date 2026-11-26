@@ -1195,6 +1195,25 @@ describe("Working shelf (beta)", () => {
       row("s1", "settled"),
     ];
 
+    it("inserts a newly promoted child on either side of an active row", () => {
+      const withChild = [...items, row("child", "active")];
+      expect(resolveSidebarDropTarget(withChild, "child", "a1")?.activeOrder).toEqual([
+        "child",
+        "a1",
+        "a2",
+      ]);
+      expect(resolveSidebarDropTarget(withChild, "child", "a1", true)?.activeOrder).toEqual([
+        "a1",
+        "child",
+        "a2",
+      ]);
+      expect(resolveSidebarDropTarget(withChild, "child", "p1")?.pinnedOrder).toEqual([
+        "child",
+        "p1",
+      ]);
+      expect(resolveSidebarDropTarget(withChild, "child", "s1")?.section).toBe("settled");
+    });
+
     it("never drops into the Working shelf, and keeps it out of the inbox order", () => {
       expect(resolveSidebarDropTarget(items, "a1", "w1")).toBeNull();
       expect(resolveSidebarDropTarget(items, "p1", "a2")).toEqual({

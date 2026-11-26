@@ -2529,6 +2529,7 @@
   "6f09f810d979df20": "Falha ao despertar a thread",
   "e26ae432b56a2577": "Falha ao fixar a thread",
   "b08fe4c9d5c1ef5f": "Falha ao desafixar a thread",
+  "81e970ec32df90c6": "Falha ao mover a conversa",
   "ce12d88ccfbf1221": "Falha ao reordenar as threads ativas",
   "bfbb62b05e014f62": "Falha ao reordenar as threads fixadas",
   "195a5029df504a1e": "Falha ao adiar a thread",
@@ -2809,6 +2810,7 @@
   "3f0d3c192663b1fe": "Descartar rascunho",
   "0d8761c57796fb94": "Localizar na thread",
   "182ddc0acf67e55e": "Nova thread em {branch}",
+  "8e69fce49bda3269": "Mover para o nível superior",
   "47d5db2958bd01c9": "Desafixar thread",
   "f51626441b9dfc39": "Fixar thread",
   "0b75d1fefd7710fe": "Reabrir thread",
@@ -3209,7 +3211,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "no computador que abriu esta página"]
+      "c": [
+        " ",
+        "no computador que abriu esta página"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3221,7 +3226,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· quem executar recebe este acesso"]
+      "c": [
+        " ",
+        "· quem executar recebe este acesso"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Aprove apenas um login que você acabou de iniciar.",
@@ -12084,6 +12092,7 @@
   "ef436cc0f1cee213": ", trabalhando",
   "2c3bb8ccf6c38078": "Dispensar aviso de atualização do provedor",
   "3cef7762c22f5fb1": "Dispensar até o status do provedor mudar",
+  "f4f470fc19837800": "Aninhar aqui",
   "0f90824868d6c3af": "Nova thread ({shortcut})",
   "201317aac48d4d9f": "Limpar pesquisa de threads",
   "bcda2ccaa871dc46": "Nova thread no projeto atual: Shift+clique ({shortcut})",
@@ -12122,6 +12131,8 @@
   "8e800a9dfe7f9487": "Concluir",
   "dd46b84dfd8849bd": "Reabrir",
   "5c3e33c17a1c7cf2": "Despertar",
+  "2c0d725bdf1939b7": "Nível superior",
+  "d894c4b4adba39c6": "Aninhar aqui",
   "f8fec76a8dea38d4": "Rascunho não enviado",
   "b0b811c800c8af57": "Desafixar thread",
   "4fca00950ff1db87": "Regenerando título",

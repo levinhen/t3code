@@ -9,7 +9,7 @@ import { requestCustomSnooze } from "../CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { useDeadlinePassed } from "~/hooks/useDeadline";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/client-runtime/thread-pull-requests";
-import { useDraggable } from "@dnd-kit/core";
+import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -42,6 +42,7 @@ import {
   AlarmClockIcon,
   AlarmClockOffIcon,
   ArrowRightLeftIcon,
+  ArrowUpIcon,
   CheckIcon,
   ChevronRightIcon,
   CircleAlertIcon,
@@ -123,6 +124,7 @@ import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelName } from "../chat/providerIconUtils";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
+import { sidebarNestId } from "../Sidebar.drag";
 import type { SidebarSubtreeSummary } from "./subagentTree";
 import { useThreadRunningTerminalIds } from "../../state/terminalSessions";
 import { InlineButton } from "../ui/button";
@@ -497,7 +499,7 @@ function SnoozeMenuButton(props: {
 type SortableThreadRowBag = Pick<
   ReturnType<typeof useSortable>,
   "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
->;
+> & { readonly nestOver?: boolean };
 
 export const draftSurfaceClassName = "bg-warning/4 hover:bg-warning/8";
 export const draftPenClassName = "size-3 shrink-0 text-warning-foreground";
@@ -530,11 +532,24 @@ export function SortableThreadRow(
         : SIDEBAR_SORTABLE_DRAG_ENABLED,
     animateLayoutChanges: animateSidebarLayoutChanges,
   });
+  const nest = useDroppable({
+    id: sidebarNestId(sortableId),
+    disabled:
+      !canOperateThread ||
+      rowProps.thread.archivedAt !== null ||
+      rowProps.thread.lineage.sideChat === true ||
+      rowProps.thread.lineage.workflowStep === true,
+  });
+  const setRowNodeRef = (node: HTMLElement | null) => {
+    setNodeRef(node);
+    nest.setNodeRef(node);
+  };
   // dnd-kit memoizes each field but not the bag, so the memoized row would
   // rerender on every shell update without this.
   const bag = {
     listeners,
-    setNodeRef,
+    setNodeRef: setRowNodeRef,
+    nestOver: nest.isOver && !contextDrag,
     transform: contextDrag ? null : transform,
     transition: contextDrag && isDragging ? "transform 150ms ease-out" : transition,
     isDragging: isDragging && !contextDrag,
@@ -555,7 +570,7 @@ export function SortableThreadRow(
   return <SidebarThreadRow key={rowProps.variant} {...rowProps} thread={thread} sortable={bag} />;
 }
 export type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
-const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
+export const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
   pin: (
     <>
       <PinIcon aria-hidden className="size-3" />
@@ -584,6 +599,12 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
     <>
       <AlarmClockOffIcon aria-hidden className="size-3" />
       <T>Wake</T>
+    </>
+  ),
+  promote: (
+    <>
+      <ArrowUpIcon aria-hidden className="size-3" />
+      <T>Top level</T>
     </>
   ),
 };
@@ -618,6 +639,7 @@ type SidebarThreadRowProps = {
   sortable?: SortableThreadRowBag | undefined;
   dropVerb: SidebarDropVerb | null;
   dragOverPinned: boolean;
+  insertEdge?: "before" | "after" | null | undefined;
   sweepAction: SidebarSweepAction | null;
   snoozeWakeLabelText: string | null;
   wokeAt: string | null;
@@ -1057,7 +1079,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     shouldRecede &&
       (status === "preparing" || status === "working") &&
       "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
-    isFileDragOver && "ring-1 ring-inset ring-primary/70",
+    (isFileDragOver || props.sortable?.nestOver) && "ring-1 ring-inset ring-primary/70",
+    props.sortable?.nestOver && "bg-primary/10",
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
     props.sortable?.isDragging &&
       "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
@@ -1084,6 +1107,22 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     : props.sweepAction === "unsnooze"
       ? "wake"
       : props.sweepAction;
+  const nestIndicator = sortable?.nestOver ? (
+    <span className="pointer-events-none absolute right-2 top-1 z-20 rounded-sm bg-primary px-1.5 text-2xs text-primary-foreground">
+      <T>Nest here</T>
+    </span>
+  ) : null;
+  const insertIndicator =
+    props.insertEdge != null ? (
+      <span
+        aria-hidden
+        data-testid="sidebar-insert-line"
+        className={cn(
+          "pointer-events-none absolute inset-x-1.5 z-20 h-0.5 rounded-full bg-primary",
+          props.insertEdge === "before" ? "top-0" : "bottom-0",
+        )}
+      />
+    ) : null;
   const dragDestination =
     destinationVerb !== null ? (
       <span
@@ -1407,11 +1446,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         {...sortableRootProps}
         {...(fileDropHandlers ?? {})}
         className={cn(
-          "list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(9)]",
+          "relative list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(9)]",
           metaLine !== null && multiline && "[contain-intrinsic-size:auto_--spacing(13.5)]",
           sortable?.isDragging && "relative z-20",
         )}
       >
+        {insertIndicator}
+        {nestIndicator}
         <Tooltip disabled={isRenaming || sortable?.isDragging}>
           <TooltipTrigger
             render={
@@ -1614,11 +1655,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       // The hints are the rendered heights inside py-0.5. Revealing the open thread measures rows
       // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
+        "relative list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
         metaLineEmpty && "[contain-intrinsic-size:auto_60px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
+      {insertIndicator}
+      {nestIndicator}
       <Tooltip disabled={isRenaming || snoozeMenuOpen || sortable?.isDragging}>
         <TooltipTrigger
           render={

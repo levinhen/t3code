@@ -2529,6 +2529,7 @@
   "6f09f810d979df20": "Thread konnte nicht geweckt werden",
   "e26ae432b56a2577": "Thread konnte nicht angeheftet werden",
   "b08fe4c9d5c1ef5f": "Thread konnte nicht losgelöst werden",
+  "81e970ec32df90c6": "Thread konnte nicht verschoben werden",
   "ce12d88ccfbf1221": "Aktive Threads konnten nicht neu sortiert werden",
   "bfbb62b05e014f62": "Angeheftete Threads konnten nicht neu sortiert werden",
   "195a5029df504a1e": "Thread konnte nicht zurückgestellt werden",
@@ -2810,6 +2811,7 @@
   "3f0d3c192663b1fe": "Entwurf verwerfen",
   "0d8761c57796fb94": "Im Thread suchen",
   "182ddc0acf67e55e": "Neuer Thread auf {branch}",
+  "8e69fce49bda3269": "Auf oberste Ebene verschieben",
   "47d5db2958bd01c9": "Thread loslösen",
   "f51626441b9dfc39": "Thread anheften",
   "0b75d1fefd7710fe": "Erledigt aufheben",
@@ -3210,7 +3212,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "auf dem Computer, der diese Seite geöffnet hat"]
+      "c": [
+        " ",
+        "auf dem Computer, der diese Seite geöffnet hat"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3222,7 +3227,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· wer es ausführt, erhält diesen Zugriff"]
+      "c": [
+        " ",
+        "· wer es ausführt, erhält diesen Zugriff"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Genehmige nur eine Anmeldung, die du gerade selbst gestartet hast.",
@@ -12086,6 +12094,7 @@
   "ef436cc0f1cee213": ", arbeitet",
   "2c3bb8ccf6c38078": "Hinweis zum Anbieter-Update schließen",
   "3cef7762c22f5fb1": "Ausblenden, bis sich der Anbieterstatus ändert",
+  "f4f470fc19837800": "Hier verschachteln",
   "0f90824868d6c3af": "Neuer Thread ({shortcut})",
   "201317aac48d4d9f": "Thread-Suche leeren",
   "bcda2ccaa871dc46": "Neuer Thread im aktuellen Projekt: Shift+Klick ({shortcut})",
@@ -12124,6 +12133,8 @@
   "8e800a9dfe7f9487": "Erledigen",
   "dd46b84dfd8849bd": "Erledigt aufheben",
   "5c3e33c17a1c7cf2": "Aufwecken",
+  "2c0d725bdf1939b7": "Oberste Ebene",
+  "d894c4b4adba39c6": "Hier verschachteln",
   "f8fec76a8dea38d4": "Nicht gesendeter Entwurf",
   "b0b811c800c8af57": "Thread loslösen",
   "4fca00950ff1db87": "Titel wird neu generiert",

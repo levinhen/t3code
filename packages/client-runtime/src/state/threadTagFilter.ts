@@ -10,7 +10,7 @@ import { threadKey } from "./entities.ts";
 
 type FilterableThread = Pick<
   OrchestrationV2ThreadShell,
-  "id" | "lineage" | "tags" | "delegatedFrom"
+  "id" | "lineage" | "tags" | "delegatedFrom" | "sidebarParent"
 >;
 
 export interface TagFilteredEnvironment {
@@ -25,8 +25,11 @@ export const NO_HIDDEN_THREADS: ReadonlySet<string> = new Set();
 /** The thread a subagent, side chat or delegated task takes its visibility from, if any. */
 export function visibilityParentKey(
   environmentId: EnvironmentId,
-  thread: Pick<FilterableThread, "lineage" | "delegatedFrom">,
+  thread: Pick<FilterableThread, "lineage" | "delegatedFrom" | "sidebarParent">,
 ): string | null {
+  if (thread.sidebarParent?.kind === "top_level") return null;
+  if (thread.sidebarParent?.kind === "thread")
+    return threadKey({ environmentId, threadId: thread.sidebarParent.threadId });
   const parentId = thread.lineage.parentThreadId;
   if (!isListedThreadLineage(thread.lineage) && parentId !== null) {
     return threadKey({ environmentId, threadId: parentId });
@@ -102,7 +105,7 @@ export function hiddenThreadKeys(
       hiddenByKey.set(key, false);
       return false;
     }
-    if (parentKey !== null && !followsParent && hidingAnywhere) {
+    if (parentKey !== null && !followsParent && hidingAnywhere && thread.sidebarParent == null) {
       hiddenByKey.set(key, true);
       return true;
     }

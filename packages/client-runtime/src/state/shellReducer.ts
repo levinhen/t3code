@@ -166,7 +166,7 @@ export function applyShellStreamEvent(
       }
       const withoutThread = (threads: OrchestrationV2ShellSnapshot["threads"]) =>
         threads.filter((thread) => thread.id !== event.thread.id);
-      return {
+      const next = {
         ...snapshot,
         threads:
           event.location === "active"
@@ -178,6 +178,9 @@ export function applyShellStreamEvent(
         archivedThreads: withoutThread(snapshot.archivedThreads),
         snapshotSequence: event.sequence,
       };
+      return event.thread.sidebarParent != null
+        ? withoutRemovedIdleSubagents(next, new Set([event.thread.id]))
+        : next;
     }
     case "thread.removed":
       return withoutRemovedIdleSubagents(
@@ -266,6 +269,7 @@ export function applyShellStreamEvents(
         break;
       case "thread.updated": {
         const id = event.thread.id;
+        if (event.thread.sidebarParent != null) removed.add(id);
         if (event.location === "active") {
           const previous = threads.get(id);
           if (previous !== undefined && sameThreadShell(previous, event.thread)) break;

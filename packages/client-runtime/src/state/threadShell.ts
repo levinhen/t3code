@@ -1,3 +1,4 @@
+import { scopedThreadKey } from "../environment/scoped.ts";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 import type {
@@ -68,8 +69,95 @@ export function isShownUnderParent(
   ref: ScopedThreadRef,
   lineage: OrchestrationV2ThreadShell["lineage"],
   delegatedUnderParent: ReadonlySet<string>,
+  sidebarParent?: OrchestrationV2ThreadShell["sidebarParent"],
 ): boolean {
+  if (sidebarParent?.kind === "top_level") return false;
+  if (sidebarParent?.kind === "thread") return delegatedUnderParent.has(threadKey(ref));
   return !isListedThreadLineage(lineage) || delegatedUnderParent.has(threadKey(ref));
+}
+
+export function sidebarParentThreadRef(
+  thread: Pick<
+    EnvironmentThreadShell,
+    "environmentId" | "lineage" | "delegatedFrom" | "sidebarParent"
+  >,
+): ScopedThreadRef | null {
+  if (thread.sidebarParent?.kind === "top_level") return null;
+  if (thread.sidebarParent?.kind === "thread")
+    return { environmentId: thread.environmentId, threadId: thread.sidebarParent.threadId };
+  if (!isListedThreadLineage(thread.lineage))
+    return thread.lineage.parentThreadId === null
+      ? null
+      : { environmentId: thread.environmentId, threadId: thread.lineage.parentThreadId };
+  return thread.delegatedFrom ?? null;
+}
+
+function resolveActiveAcyclicChildren<
+  T extends Pick<
+    EnvironmentThreadShell,
+    "id" | "environmentId" | "archivedAt" | "lineage" | "delegatedFrom" | "sidebarParent"
+  >,
+>(threadsByKey: ReadonlyMap<string, T>, predicate: (thread: T) => boolean): Set<string> {
+  const activeRootReachable = new Map<string, boolean>();
+  const reachesActiveRoot = (key: string, stack: Set<string>): boolean => {
+    const cached = activeRootReachable.get(key);
+    if (cached !== undefined) return cached;
+    if (stack.has(key)) return false;
+    const thread = threadsByKey.get(key);
+    if (thread === undefined || thread.archivedAt !== null) return false;
+    const parent = sidebarParentThreadRef(thread);
+    if (parent === null) {
+      activeRootReachable.set(key, true);
+      return true;
+    }
+    const parentKey = threadKey(parent);
+    const parentThread = threadsByKey.get(parentKey);
+    if (parentThread === undefined || parentThread.archivedAt !== null) {
+      // Missing or archived parent falls back to top-level for explicit overrides / delegated tasks.
+      const fallsBackToRoot =
+        thread.sidebarParent?.kind === "thread" ||
+        (thread.sidebarParent == null &&
+          isListedThreadLineage(thread.lineage) &&
+          thread.delegatedFrom != null);
+      activeRootReachable.set(key, fallsBackToRoot);
+      return fallsBackToRoot;
+    }
+    stack.add(key);
+    const reachable = reachesActiveRoot(parentKey, stack);
+    stack.delete(key);
+    activeRootReachable.set(key, reachable);
+    return reachable;
+  };
+
+  const underParent = new Set<string>();
+  for (const [key, thread] of threadsByKey) {
+    if (!predicate(thread)) continue;
+    const parent = sidebarParentThreadRef(thread);
+    if (parent === null) continue;
+    const parentKey = threadKey(parent);
+    if (parentKey === key) continue;
+    const parentThread = threadsByKey.get(parentKey);
+    if (parentThread === undefined || parentThread.archivedAt !== null) continue;
+    if (reachesActiveRoot(parentKey, new Set([key]))) {
+      underParent.add(key);
+    }
+  }
+  return underParent;
+}
+
+export function sidebarChildrenWithListedParents(
+  threads: readonly Pick<
+    EnvironmentThreadShell,
+    "id" | "environmentId" | "archivedAt" | "lineage" | "delegatedFrom" | "sidebarParent"
+  >[],
+): ReadonlySet<string> {
+  const threadsByKey = new Map(
+    threads.map((thread) => [
+      threadKey({ environmentId: thread.environmentId, threadId: thread.id }),
+      thread,
+    ]),
+  );
+  return resolveActiveAcyclicChildren(threadsByKey, () => true);
 }
 
 // Subagents, side chats and tasks delegated from a listed parent have no list row,
@@ -79,7 +167,7 @@ export function resolveListedAncestorThreadRef(
   ref: ScopedThreadRef,
   threads: readonly Pick<
     EnvironmentThreadShell,
-    "id" | "environmentId" | "lineage" | "delegatedFrom" | "archivedAt"
+    "id" | "environmentId" | "lineage" | "delegatedFrom" | "archivedAt" | "sidebarParent"
   >[],
 ): ScopedThreadRef {
   const findThread = (target: ScopedThreadRef) =>
@@ -91,7 +179,11 @@ export function resolveListedAncestorThreadRef(
   let thread = findThread(current);
   while (thread !== undefined) {
     let parent: ScopedThreadRef;
-    if (!isListedThreadLineage(thread.lineage)) {
+    if (thread.sidebarParent != null) {
+      const override = sidebarParentThreadRef(thread);
+      if (override === null || findThread(override)?.archivedAt !== null) return current;
+      parent = override;
+    } else if (!isListedThreadLineage(thread.lineage)) {
       if (thread.lineage.parentThreadId === null) return ref;
       parent = { environmentId: thread.environmentId, threadId: thread.lineage.parentThreadId };
     } else if (thread.delegatedFrom != null) {
@@ -752,21 +844,29 @@ export function createEnvironmentThreadShellAtoms(input: {
   let previousDelegatedUnderParent: ReadonlySet<string> = new Set();
   const delegatedUnderParentAtom = Atom.make((get) => {
     const environmentIds = new Set(enabledEnvironmentIds(get(input.catalogValueAtom)));
-    const next = new Set<string>();
+    const threadsByKey = new Map<
+      string,
+      Pick<
+        EnvironmentThreadShell,
+        "id" | "environmentId" | "archivedAt" | "lineage" | "delegatedFrom" | "sidebarParent"
+      >
+    >();
     for (const environmentId of environmentIds) {
       for (const thread of get(environmentThreadsAtom(environmentId))) {
-        const parent = thread.delegatedFrom;
-        if (
-          parent !== undefined &&
-          environmentIds.has(parent.environmentId) &&
-          // An archived parent leaves navigation; its task there stays listed on its own.
-          get(environmentThreadIndexAtom(parent.environmentId)).get(parent.threadId)?.archivedAt ===
-            null
-        ) {
-          next.add(threadKey({ environmentId, threadId: thread.id }));
-        }
+        threadsByKey.set(threadKey({ environmentId, threadId: thread.id }), {
+          id: thread.id,
+          environmentId,
+          archivedAt: thread.archivedAt === null ? null : String(thread.archivedAt),
+          lineage: thread.lineage,
+          delegatedFrom: thread.delegatedFrom ?? null,
+          sidebarParent: thread.sidebarParent ?? null,
+        });
       }
     }
+    const next = resolveActiveAcyclicChildren(
+      threadsByKey,
+      (thread) => thread.sidebarParent != null || thread.delegatedFrom != null,
+    );
     if (
       next.size === previousDelegatedUnderParent.size &&
       [...next].every((key) => previousDelegatedUnderParent.has(key))
@@ -801,8 +901,10 @@ export function createEnvironmentThreadShellAtoms(input: {
     const next = new Map<string, IdleSubagentChildren>();
     for (const [environmentId, idle] of sources) {
       for (const entry of idle ?? []) {
-        next.set(threadKey({ environmentId, threadId: entry.parentThreadId }), {
-          threadKeys: entry.threadIds.map((threadId) => threadKey({ environmentId, threadId })),
+        next.set(scopedThreadKey({ environmentId, threadId: entry.parentThreadId }), {
+          threadKeys: entry.threadIds.map((threadId) =>
+            scopedThreadKey({ environmentId, threadId }),
+          ),
           providerInstanceIds: entry.providerInstanceIds,
         });
       }
@@ -822,7 +924,12 @@ export function createEnvironmentThreadShellAtoms(input: {
       for (const thread of get(environmentThreadsAtom(environmentId))) {
         if (
           thread.archivedAt !== null ||
-          isShownUnderParent({ environmentId, threadId: thread.id }, thread.lineage, underParent) ||
+          isShownUnderParent(
+            { environmentId, threadId: thread.id },
+            thread.lineage,
+            underParent,
+            thread.sidebarParent,
+          ) ||
           hidden.has(threadKey({ environmentId, threadId: thread.id }))
         ) {
           continue;

@@ -1,3 +1,8 @@
+import { useDraggable, useDroppable } from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
+import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { useEnvironmentScope } from "../../state/session";
+import { sidebarNestId } from "../Sidebar.drag";
 import { toServerClock } from "@t3tools/client-runtime/clock";
 import {
   parseScopedThreadKey,
@@ -46,11 +51,15 @@ import { textDirection } from "~/textDirection";
 import { formatWorktreePathForDisplay } from "../../worktreeCleanup";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelName } from "../chat/providerIconUtils";
-import { resolveSidebarThreadStatus, resolveWorkingStartedAt } from "../Sidebar.logic";
+import {
+  resolveSidebarThreadStatus,
+  resolveWorkingStartedAt,
+  type SidebarDropVerb,
+} from "../Sidebar.logic";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { Tooltip, TooltipTrigger } from "../ui/tooltip";
-import type { SidebarProviderEntry } from "./SidebarThreadRow";
+import { dropVerbBadge, type SidebarProviderEntry } from "./SidebarThreadRow";
 import type { SidebarSubtreeSummary } from "./subagentTree";
 
 function compactTimeLabel(timestamp: string, nowMs: number, resolve: MessageResolver) {
@@ -113,6 +122,8 @@ export interface SidebarSubagentTreeRowProps {
   readonly childSummary: SidebarSubtreeSummary;
   readonly isExpanded: boolean;
   readonly isActive: boolean;
+  readonly contextDrag?: boolean | undefined;
+  readonly dropVerb?: SidebarDropVerb | null | undefined;
   readonly revealRef?:
     | ((row: HTMLElement, threadKey: string) => (() => void) | undefined)
     | undefined;
@@ -134,6 +145,20 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
   const threadRef = scopeThreadRef(props.thread.environmentId, props.thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const thread = useThreadShell(threadRef) ?? props.thread;
+  const canOperate = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
+  const disabled =
+    !canOperate ||
+    thread.archivedAt !== null ||
+    thread.lineage.sideChat === true ||
+    thread.lineage.workflowStep === true;
+  const drag = useDraggable({ id: threadKey, disabled });
+  const nest = useDroppable({ id: sidebarNestId(threadKey), disabled });
+  const isDragging = drag.isDragging && props.contextDrag !== true;
+  const isNestOver = nest.isOver && props.contextDrag !== true;
+  const setDragRef = (node: HTMLElement | null) => {
+    drag.setNodeRef(node);
+    nest.setNodeRef(node);
+  };
   const status = resolveSidebarThreadStatus(thread);
   const isWorking = status === "working" || status === "preparing";
   const isSideChat = thread.lineage.sideChat === true;
@@ -186,21 +211,47 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
   const worktreePath = thread.worktreePath?.trim();
   const guideLevels = Array.from({ length: cappedDepth }, (_, index) => index);
 
+  const dragDestination =
+    isDragging && props.dropVerb ? (
+      <span
+        role="status"
+        className="pointer-events-none ml-auto inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-primary/40 bg-primary/10 px-1.5 text-2xs font-medium text-primary"
+      >
+        {dropVerbBadge[props.dropVerb]}
+      </span>
+    ) : null;
+
   return (
     <li
+      ref={setDragRef}
+      {...drag.listeners}
       data-subagent-tree-item={threadKey}
       data-subagent-depth={props.depth}
-      className="relative list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(7.5)]"
+      style={
+        isDragging && drag.transform
+          ? { transform: CSS.Translate.toString(drag.transform) }
+          : undefined
+      }
+      className={cn(
+        "relative list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(7.5)]",
+        isDragging && "z-20",
+      )}
     >
-      {guideLevels.map((level) => (
-        <span
-          key={level}
-          aria-hidden
-          style={{ left: `${10 + level * 14}px` }}
-          className="pointer-events-none absolute inset-y-0 w-px bg-sidebar-border/65"
-        />
-      ))}
-      <Tooltip>
+      {isNestOver && (
+        <span className="pointer-events-none absolute right-2 top-1 z-20 rounded-sm bg-primary px-1.5 text-2xs text-primary-foreground">
+          {gt("Nest here")}
+        </span>
+      )}
+      {!isDragging &&
+        guideLevels.map((level) => (
+          <span
+            key={level}
+            aria-hidden
+            style={{ left: `${10 + level * 14}px` }}
+            className="pointer-events-none absolute inset-y-0 w-px bg-sidebar-border/65"
+          />
+        ))}
+      <Tooltip disabled={isDragging}>
         <TooltipTrigger
           render={
             <div
@@ -214,9 +265,12 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
               style={{ paddingLeft: `${indentPx}px` }}
               className={cn(
                 "group/subagent-row relative flex h-7.5 w-full cursor-pointer items-center gap-1.5 rounded-md pr-2 text-left text-xs outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                props.isActive
-                  ? "bg-sidebar-row-active text-sidebar-foreground light:ring-1 light:ring-inset light:ring-sidebar-border/70"
-                  : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+                isNestOver && "ring-1 ring-inset ring-primary/70 bg-primary/10",
+                isDragging
+                  ? "bg-sidebar-row-active text-sidebar-foreground shadow-md ring-1 ring-inset ring-sidebar-border/70"
+                  : props.isActive
+                    ? "bg-sidebar-row-active text-sidebar-foreground light:ring-1 light:ring-inset light:ring-sidebar-border/70"
+                    : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
               )}
               onClick={(event) => props.onThreadClick(event, threadRef)}
               onKeyDown={handleKeyDown}
@@ -302,30 +356,32 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
               {props.childSummary.totalCount}
             </span>
           ) : null}
-          <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-2xs text-secondary-label tabular-nums">
-            {isWorking ? (
-              <span className="inline-flex items-center gap-1 font-medium text-info-foreground">
-                <CircleDashedIcon aria-hidden className="size-3 shrink-0" />
-                <SubagentWorkingDuration
-                  environmentId={thread.environmentId}
-                  startedAt={resolveWorkingStartedAt(thread)}
-                />
-              </span>
-            ) : status === "approval" ? (
-              <ShieldQuestionIcon aria-hidden className="size-3 text-warning-foreground" />
-            ) : status === "input" ? (
-              <MessageCircleQuestionIcon aria-hidden className="size-3 text-warning-foreground" />
-            ) : status === "failed" ? (
-              <CircleAlertIcon aria-hidden className="size-3 text-error-foreground" />
-            ) : thread.latestRun?.status === "completed" ? (
-              <>
-                <CircleCheckIcon aria-hidden className="size-3 text-success-foreground/75" />
+          {dragDestination ?? (
+            <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-2xs text-secondary-label tabular-nums">
+              {isWorking ? (
+                <span className="inline-flex items-center gap-1 font-medium text-info-foreground">
+                  <CircleDashedIcon aria-hidden className="size-3 shrink-0" />
+                  <SubagentWorkingDuration
+                    environmentId={thread.environmentId}
+                    startedAt={resolveWorkingStartedAt(thread)}
+                  />
+                </span>
+              ) : status === "approval" ? (
+                <ShieldQuestionIcon aria-hidden className="size-3 text-warning-foreground" />
+              ) : status === "input" ? (
+                <MessageCircleQuestionIcon aria-hidden className="size-3 text-warning-foreground" />
+              ) : status === "failed" ? (
+                <CircleAlertIcon aria-hidden className="size-3 text-error-foreground" />
+              ) : thread.latestRun?.status === "completed" ? (
+                <>
+                  <CircleCheckIcon aria-hidden className="size-3 text-success-foreground/75" />
+                  <SubagentRelativeTime timestamp={resolveThreadActivityTimestamp(thread)} />
+                </>
+              ) : (
                 <SubagentRelativeTime timestamp={resolveThreadActivityTimestamp(thread)} />
-              </>
-            ) : (
-              <SubagentRelativeTime timestamp={resolveThreadActivityTimestamp(thread)} />
-            )}
-          </span>
+              )}
+            </span>
+          )}
         </TooltipTrigger>
         <ThreadHoverCardPopup side="right" align="start" sideOffset={4}>
           <ThreadHoverCard title={thread.title}>

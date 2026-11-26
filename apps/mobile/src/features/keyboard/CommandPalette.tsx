@@ -241,6 +241,7 @@ export function CommandPalette(props: {
   const environments = useWorkspaceEnvironments();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [query, setQuery] = useState("");
+  const isSearching = query.trim().length > 0;
   // Ranking is relative to when the palette opened, so rows do not reorder as time passes.
   const [now] = useState(() => Date.now());
   const [selection, setSelection] = useState<string | null>(null);
@@ -454,11 +455,13 @@ export function CommandPalette(props: {
       .filter(
         (thread) =>
           thread.archivedAt === null &&
-          !isShownUnderParent(
-            { environmentId: thread.environmentId, threadId: thread.id },
-            thread.lineage,
-            delegatedUnderParent,
-          ),
+          ((isSearching && thread.sidebarParent?.kind === "thread") ||
+            !isShownUnderParent(
+              { environmentId: thread.environmentId, threadId: thread.id },
+              thread.lineage,
+              delegatedUnderParent,
+              thread.sidebarParent,
+            )),
       )
       .map((thread) => {
         const project = projectByKey.get(scopedProjectKey(thread.environmentId, thread.projectId));
@@ -508,6 +511,7 @@ export function CommandPalette(props: {
     startTriage,
     threads,
     delegatedUnderParent,
+    isSearching,
     triageEnvironmentId,
     gt,
   ]);

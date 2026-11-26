@@ -10,6 +10,7 @@ export type ThreadActionMenuId =
   | "filter-by-project"
   | "turn-into-project"
   | "project-settings"
+  | "promote"
   | "pin"
   | "unpin"
   | "settle"
@@ -96,6 +97,7 @@ export function buildDraftActionMenuItems(
 export interface ThreadActionMenuState {
   readonly canOperate: boolean;
   readonly canFind?: boolean;
+  readonly canPromote?: boolean;
   /** False where no inline title editor is rendered, such as sidebar search results. */
   readonly canRename?: boolean;
   readonly branch: string | null;
@@ -159,6 +161,9 @@ export function buildThreadActionMenuItems(
             icon: "message-square-plus",
           },
         ]
+      : []),
+    ...(state.canPromote
+      ? [{ id: "promote" as const, label: resolve(msg("Move to top level")), icon: "arrow-up" }]
       : []),
     ...(state.supports.pinning
       ? [

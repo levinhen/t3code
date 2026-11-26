@@ -549,6 +549,7 @@ function OpenCommandPaletteDialog(props: {
         { environmentId: thread.environmentId, threadId: thread.id },
         thread.lineage,
         delegatedUnderParent,
+        thread.sidebarParent,
       ),
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
