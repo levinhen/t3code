@@ -359,4 +359,24 @@ describe("sidebar subagent tree", () => {
     expect(result.summary.totalCount).toBe(1);
     expect(result.rows.map((row) => row.thread.id)).toEqual([bId]);
   });
+
+  it("rejects nesting a child onto its current direct parent", () => {
+    const parentId = ThreadId.make("parent");
+    const childId = ThreadId.make("child");
+    const otherId = ThreadId.make("other");
+    const parent = makeThread({ id: parentId });
+    const child = makeThread({
+      id: childId,
+      lineage: {
+        rootThreadId: parentId,
+        parentThreadId: parentId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const other = makeThread({ id: otherId });
+    const byParent = buildSidebarChildThreadsByParent([parent, child, other], NONE);
+    expect(canNestSidebarThread(child, parent, byParent)).toBe(false);
+    expect(canNestSidebarThread(child, other, byParent)).toBe(true);
+    expect(canNestSidebarThread(parent, child, byParent)).toBe(false);
+  });
 });

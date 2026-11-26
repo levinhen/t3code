@@ -2099,6 +2099,35 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       cancelThreadDrag();
     }
   }, [cancelThreadDrag, dragState, allThreadsByKey]);
+  const nestDwellTarget = isContextDrag ? null : (dragState?.nestTarget ?? null);
+  const nestDwellHasChildren =
+    nestDwellTarget !== null &&
+    ((childThreadsByParent.get(nestDwellTarget)?.length ?? 0) > 0 ||
+      idleSubagents.has(nestDwellTarget));
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- spring-loads a collapsed nest target after hovering briefly during drag
+  useEffect(() => {
+    if (nestDwellTarget === null || !nestDwellHasChildren) return;
+    if (threadSubtreeExpandedById[nestDwellTarget] === true) return;
+    const timer = window.setTimeout(() => {
+      setThreadSubtreeExpanded(nestDwellTarget, true);
+    }, 550);
+    return () => window.clearTimeout(timer);
+  }, [nestDwellTarget, nestDwellHasChildren, threadSubtreeExpandedById, setThreadSubtreeExpanded]);
+  const draggedDescendantKeys = (() => {
+    const keys = new Set<string>();
+    if (dragState === null || isContextDrag) return keys;
+    const stack = [dragState.activeKey];
+    while (stack.length > 0) {
+      const parentKey = stack.pop()!;
+      for (const child of childThreadsByParent.get(parentKey) ?? []) {
+        const childKey = threadShellKey(child);
+        if (keys.has(childKey)) continue;
+        keys.add(childKey);
+        stack.push(childKey);
+      }
+    }
+    return keys;
+  })();
   const subtreeExpansionKey = Object.entries(threadSubtreeExpandedById)
     .map(([key, expanded]) => `${key}=${expanded ? "1" : "0"}`)
     .sort()
@@ -3726,6 +3755,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             dragOverPinned={
                               dragState?.activeKey === threadKey && dragTargetSection === "pinned"
                             }
+                            draggingOverNest={
+                              dragState?.activeKey === threadKey && dragState.nestTarget != null
+                            }
                             insertEdge={
                               !isContextDrag && dragState?.promoteInsert?.key === threadKey
                                 ? dragState.promoteInsert.edge
@@ -3812,6 +3844,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               isExpanded={descendant.isExpanded}
                               isActive={routeThreadKey === descendant.threadKey}
                               contextDrag={isContextDrag}
+                              draggingOverNest={
+                                dragState?.activeKey === descendant.threadKey &&
+                                dragState.nestTarget != null
+                              }
+                              isAncestorDragging={draggedDescendantKeys.has(descendant.threadKey)}
                               dropVerb={
                                 dragState?.activeKey === descendant.threadKey &&
                                 dragState.nestTarget == null

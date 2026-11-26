@@ -123,6 +123,8 @@ export interface SidebarSubagentTreeRowProps {
   readonly isExpanded: boolean;
   readonly isActive: boolean;
   readonly contextDrag?: boolean | undefined;
+  readonly draggingOverNest?: boolean | undefined;
+  readonly isAncestorDragging?: boolean | undefined;
   readonly dropVerb?: SidebarDropVerb | null | undefined;
   readonly revealRef?:
     | ((row: HTMLElement, threadKey: string) => (() => void) | undefined)
@@ -235,10 +237,11 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
       className={cn(
         "relative list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(7.5)]",
         isDragging && "z-20",
+        props.isAncestorDragging && !isDragging && "pointer-events-none opacity-35",
       )}
     >
       {isNestOver && (
-        <span className="pointer-events-none absolute right-2 top-1 z-20 rounded-sm bg-primary px-1.5 text-2xs text-primary-foreground">
+        <span className="pointer-events-none absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-sm bg-primary px-1.5 py-0.5 text-2xs font-medium text-primary-foreground shadow-xs">
           {gt("Nest here")}
         </span>
       )}
@@ -267,7 +270,9 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
                 "group/subagent-row relative flex h-7.5 w-full cursor-pointer items-center gap-1.5 rounded-md pr-2 text-left text-xs outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                 isNestOver && "ring-1 ring-inset ring-primary/70 bg-primary/10",
                 isDragging
-                  ? "bg-sidebar-row-active text-sidebar-foreground shadow-md ring-1 ring-inset ring-sidebar-border/70"
+                  ? props.draggingOverNest
+                    ? "bg-sidebar-row-active/90 text-sidebar-foreground opacity-80 shadow-md ring-1 ring-inset ring-sidebar-border/70"
+                    : "bg-sidebar-row-active text-sidebar-foreground shadow-md ring-1 ring-inset ring-sidebar-border/70"
                   : props.isActive
                     ? "bg-sidebar-row-active text-sidebar-foreground light:ring-1 light:ring-inset light:ring-sidebar-border/70"
                     : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",

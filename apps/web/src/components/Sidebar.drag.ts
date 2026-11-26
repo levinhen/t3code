@@ -49,15 +49,16 @@ export function createSidebarCollisionDetection(
       for (const container of args.droppableContainers) {
         const key = sidebarNestKey(String(container.id));
         if (key === null || key === String(args.active.id)) continue;
-        const rect =
-          container.node.current?.getBoundingClientRect() ?? args.droppableRects.get(container.id);
+        // Read dnd-kit's layout rect instead of live transformed bounds so toggling
+        // sibling transforms on nest entry cannot bounce the row out from under the pointer.
+        const rect = args.droppableRects.get(container.id);
+        if (!rect || rect.height <= 0) continue;
+        const inset = rect.height * (rect.height >= 48 ? 0.28 : 0.25);
         if (
-          !rect ||
-          rect.height <= 0 ||
           pointer.x < rect.left ||
           pointer.x > rect.right ||
-          pointer.y < rect.top + rect.height * 0.25 ||
-          pointer.y > rect.bottom - rect.height * 0.25
+          pointer.y < rect.top + inset ||
+          pointer.y > rect.bottom - inset
         )
           continue;
         if (!options.canNest(key)) continue;

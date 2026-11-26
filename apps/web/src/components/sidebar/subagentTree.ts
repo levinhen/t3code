@@ -328,8 +328,12 @@ export function canNestSidebarThread<T extends SidebarTreeThread>(
     )
   )
     return false;
+  const sourceKey = treeThreadKey(source);
   const targetKey = treeThreadKey(target);
-  const stack = [treeThreadKey(source)];
+  if ((childrenByParent.get(targetKey) ?? []).some((child) => treeThreadKey(child) === sourceKey)) {
+    return false;
+  }
+  const stack = [sourceKey];
   const seen = new Set<string>();
   while (stack.length > 0) {
     const key = stack.pop()!;

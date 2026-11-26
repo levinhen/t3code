@@ -639,6 +639,7 @@ type SidebarThreadRowProps = {
   sortable?: SortableThreadRowBag | undefined;
   dropVerb: SidebarDropVerb | null;
   dragOverPinned: boolean;
+  draggingOverNest?: boolean | undefined;
   insertEdge?: "before" | "after" | null | undefined;
   sweepAction: SidebarSweepAction | null;
   snoozeWakeLabelText: string | null;
@@ -1083,7 +1084,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     props.sortable?.nestOver && "bg-primary/10",
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
     props.sortable?.isDragging &&
-      "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
+      (props.draggingOverNest
+        ? "bg-sidebar/90 text-sidebar-foreground opacity-80 shadow-md"
+        : "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg"),
   );
   const sortable = props.sortable;
   const sortableRootProps = sortable
@@ -1108,7 +1111,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       ? "wake"
       : props.sweepAction;
   const nestIndicator = sortable?.nestOver ? (
-    <span className="pointer-events-none absolute right-2 top-1 z-20 rounded-sm bg-primary px-1.5 text-2xs text-primary-foreground">
+    <span className="pointer-events-none absolute right-2 top-1.5 z-20 rounded-sm bg-primary px-1.5 py-0.5 text-2xs font-medium text-primary-foreground shadow-xs">
       <T>Nest here</T>
     </span>
   ) : null;
