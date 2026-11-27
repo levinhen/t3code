@@ -119,8 +119,11 @@ import Migration0108 from "./Migrations/108_AgentFeedback.ts";
 import Migration0109 from "./Migrations/109_IssueTrackerAccounts.ts";
 import Migration0110 from "./Migrations/110_Workflows.ts";
 import Migration0111 from "./Migrations/111_SupersededRunAttemptIndex.ts";
-import Migration0112 from "./Migrations/112_SidebarParentShellIndex.ts";
-import Migration0113 from "./Migrations/113_TaskGroups.ts";
+import {
+  hasPendingForkMigrations,
+  reconcileLegacyForkLedger,
+  runForkMigrations,
+} from "./forkMigrations.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -235,8 +238,6 @@ const migrationEntries = [
   [109, "IssueTrackerAccounts", Migration0109],
   [110, "Workflows", Migration0110],
   [111, "SupersededRunAttemptIndex", Migration0111],
-  [112, "SidebarParentShellIndex", Migration0112],
-  [113, "TaskGroups", Migration0113],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -297,7 +298,8 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function*
 
 const latestMigrationId = Math.max(...migrationEntries.map(([id]) => id));
 
-// Mirrors the Migrator, which runs only ids above the highest recorded, plus the V2-preview reconciliation.
+// Mirrors the Migrator, which runs only ids above the highest recorded, plus the V2-preview
+// reconciliation and the fork ledger.
 export const hasPendingMigrations = Effect.fn("hasPendingMigrations")(function* () {
   const sql = yield* SqlClient.SqlClient;
   const tables = yield* sql`
@@ -311,7 +313,8 @@ export const hasPendingMigrations = Effect.fn("hasPendingMigrations")(function* 
     FROM effect_sql_migrations
   `;
   const row = rows[0];
-  return (row?.latestId ?? 0) < latestMigrationId || (row?.previewRows ?? 0) > 0;
+  if ((row?.latestId ?? 0) < latestMigrationId || (row?.previewRows ?? 0) > 0) return true;
+  return yield* hasPendingForkMigrations();
 });
 
 const run = Migrator.make({});
@@ -326,6 +329,8 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   // The desktop waits past its readiness budget until the finished line follows this one.
   const hasPending = yield* hasPendingMigrations();
   if (hasPending) yield* Effect.log(DATABASE_MIGRATIONS_STARTED_MESSAGE);
+  // Before the history check, which would reject the ids older fork builds left behind.
+  if (hasPending) yield* reconcileLegacyForkLedger();
   const includesV2 =
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
   // The reconcile takes the write lock; CLI startup must not contend with the server for a no-op.
@@ -362,8 +367,14 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     }
     executedMigrations.push(...(yield* run({ loader: makeMigrationLoader(id) })));
   }
-  const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
-  yield* migrations.length === 0
+  const forkMigrations =
+    hasPending && toMigrationInclusive === undefined ? yield* runForkMigrations() : [];
+  const migrations = [
+    ...executedMigrations.map(([id, name]) => `${id}_${name}`),
+    ...forkMigrations.map(([id, name]) => `fork_${id}_${name}`),
+  ];
+  // A started line needs its finished line even when only the legacy fork ledger moved.
+  yield* migrations.length === 0 && !hasPending
     ? Effect.logDebug("Database schema is current")
     : Effect.log(DATABASE_MIGRATIONS_FINISHED_MESSAGE).pipe(Effect.annotateLogs({ migrations }));
 
