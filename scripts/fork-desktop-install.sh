@@ -12,6 +12,8 @@ official="/Applications/T3 Code (Beta).app"
 out="$repo/.t3/fork-desktop-build"
 backup_dir="$HOME/.t3/backups"
 
+bash "$repo/scripts/fork-move-migrations.sh"
+
 base="$(node -p "require('$repo/apps/desktop/package.json').version")"
 # A preview version has no update feed, so no updater replaces this build. The next patch keeps it
 # ordered after the release it was built from.
