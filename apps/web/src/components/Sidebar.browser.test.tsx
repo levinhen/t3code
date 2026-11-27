@@ -23,7 +23,7 @@ import { userEvent } from "vite-plus/test/browser";
 import { act, fakeTimers, render } from "../../test/render";
 import { openCommandPalette } from "../commandPaletteBus";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
-import { makeThreadFixture } from "../test-fixtures";
+import { makeThreadFixture, type ThreadFixtureOverrides } from "../test-fixtures";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { __setClientSettingsForTests, getClientSettings } from "../hooks/useSettings";
@@ -647,7 +647,11 @@ describe("sidebar subagent tree", () => {
     const rootToggle = screen.container.querySelector<HTMLButtonElement>(
       '[data-testid="sidebar-subagent-tree-toggle"]',
     )!;
-    expect(rootToggle.textContent).toContain("2");
+    expect(
+      screen.container
+        .querySelector('[data-testid="sidebar-subtree-counts"]')
+        ?.getAttribute("aria-label"),
+    ).toBe("2 nested threads · 2 done");
     await userEvent.click(rootToggle);
 
     await expect.element(screen.getByText("Child subagent")).toBeInTheDocument();
@@ -670,6 +674,67 @@ describe("sidebar subagent tree", () => {
         screen.container.querySelectorAll('[data-testid="sidebar-subagent-row"]'),
       ).toHaveLength(0);
     });
+  });
+
+  it("shows running and waiting nested threads under a collapsed parent", async () => {
+    const activeProject = project("active");
+    const rootThread = makeThreadFixture({
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+      id: ThreadId.make("peek-root"),
+      title: "Peek parent",
+    });
+    const child = (id: string, title: string, overrides: ThreadFixtureOverrides) =>
+      makeThreadFixture({
+        environmentId: activeProject.environmentId,
+        projectId: activeProject.id,
+        id: ThreadId.make(id),
+        title,
+        lineage: {
+          rootThreadId: rootThread.id,
+          parentThreadId: rootThread.id,
+          relationshipToParent: "subagent",
+        },
+        ...overrides,
+      });
+    const runtime = {
+      status: "running" as const,
+      activeRunId: null,
+      providerInstanceId: rootThread.modelSelection.instanceId,
+      providerName: "Codex",
+      lastError: null,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    vi.mocked(useProjects).mockReturnValue([activeProject]);
+    vi.mocked(useQuietThreadShells).mockReturnValue([
+      rootThread,
+      child("peek-a-done", "Finished helper", {}),
+      child("peek-b-approval", "Helper needs approval", { hasPendingApprovals: true }),
+      child("peek-c-running", "Running helper", { runtime }),
+    ]);
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+    await expect.element(screen.getByText("Peek parent")).toBeInTheDocument();
+    const toggle = screen.container.querySelector<HTMLButtonElement>(
+      '[data-testid="sidebar-subagent-tree-toggle"]',
+    )!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByTestId("sidebar-subtree-counts").element().getAttribute("aria-label")).toBe(
+      "3 nested threads · 1 waiting on you · 1 running · 1 done",
+    );
+    const peekTitles = () =>
+      Array.from(
+        screen.container.querySelectorAll('[data-subagent-peek="true"] [dir]'),
+        (title) => title.textContent,
+      );
+    expect(peekTitles()).toEqual(["Helper needs approval", "Running helper"]);
+
+    await userEvent.click(toggle);
+    await expect.element(screen.getByText("Finished helper")).toBeInTheDocument();
+    expect(peekTitles()).toEqual([]);
   });
 
   it("offers promotion for a nested thread without changing its runtime lineage", async () => {
@@ -830,6 +895,7 @@ describe("sidebar subagent tree", () => {
           key("idle-root"),
           {
             threadKeys: [key("idle-a"), key("idle-b"), key("idle-c")],
+            failedThreadKeys: new Set<string>(),
             providerInstanceIds: [rootThread.modelSelection.instanceId],
           },
         ],
@@ -857,7 +923,9 @@ describe("sidebar subagent tree", () => {
     const toggle = screen.container.querySelector<HTMLButtonElement>(
       '[data-testid="sidebar-subagent-tree-toggle"]',
     )!;
-    expect(toggle.textContent).toContain("3");
-    expect(toggle.getAttribute("aria-label")).toBe("Expand 3 subagents");
+    expect(toggle.getAttribute("aria-label")).toBe("Expand 3 nested threads");
+    expect(screen.getByTestId("sidebar-subtree-counts").element().getAttribute("aria-label")).toBe(
+      "3 nested threads · 3 done",
+    );
   });
 });

@@ -360,6 +360,8 @@ function sameApartFromStreaming(
 /** A parent's subagent children the shell left out, which its thread family reads. */
 export interface IdleSubagentChildren {
   readonly threadKeys: ReadonlyArray<string>;
+  /** Those of `threadKeys` whose latest run failed. */
+  readonly failedThreadKeys: ReadonlySet<string>;
   readonly providerInstanceIds: ReadonlyArray<ProviderInstanceId>;
 }
 
@@ -904,6 +906,11 @@ export function createEnvironmentThreadShellAtoms(input: {
         next.set(scopedThreadKey({ environmentId, threadId: entry.parentThreadId }), {
           threadKeys: entry.threadIds.map((threadId) =>
             scopedThreadKey({ environmentId, threadId }),
+          ),
+          failedThreadKeys: new Set(
+            (entry.failedThreadIds ?? []).map((threadId) =>
+              scopedThreadKey({ environmentId, threadId }),
+            ),
           ),
           providerInstanceIds: entry.providerInstanceIds,
         });

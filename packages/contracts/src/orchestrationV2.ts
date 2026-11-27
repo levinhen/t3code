@@ -2590,6 +2590,8 @@ export type OrchestrationV2ThreadShellSnapshot = typeof OrchestrationV2ThreadShe
 export const OrchestrationV2IdleSubagents = Schema.Struct({
   parentThreadId: ThreadId,
   threadIds: Schema.Array(ThreadId),
+  /** Those of `threadIds` whose latest run failed; the rest finished or never ran. */
+  failedThreadIds: Schema.optionalKey(Schema.Array(ThreadId)),
   /** The distinct providers of `threadIds`, so a client can show them without reading the rows. */
   providerInstanceIds: Schema.Array(ProviderInstanceId),
 });

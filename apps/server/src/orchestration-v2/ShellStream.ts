@@ -189,7 +189,12 @@ function buildActiveShellSnapshot(input: {
 type ShellTrimRow = Pick<
   OrchestrationV2ThreadShell,
   "id" | "projectId" | "lineage" | "settledOverride" | "settledAt" | "sidebarParent" | "taskGroupId"
-> & { readonly hasRemoteTasks?: boolean; readonly providerInstanceId?: ProviderInstanceId };
+> &
+  Partial<Pick<OrchestrationV2ThreadShell, "status">> & {
+    readonly hasRemoteTasks?: boolean;
+    readonly providerInstanceId?: ProviderInstanceId;
+    readonly latestRunFailed?: boolean;
+  };
 
 /**
  * What a subscriber's trims read across every active row. Computed from full shells or from the
@@ -199,7 +204,10 @@ interface ShellTrimFacts {
   readonly subagentParentIds: ReadonlySet<string>;
   readonly subagentThreadIds: Set<string>;
   readonly subagents: ReadonlyArray<
-    Pick<ShellTrimRow, "id" | "providerInstanceId"> & { readonly parentThreadId: ThreadId }
+    Pick<ShellTrimRow, "id" | "providerInstanceId"> & {
+      readonly parentThreadId: ThreadId;
+      readonly failed: boolean;
+    }
   >;
   /** Only the store's index knows these; shells alone leave it empty. */
   readonly remoteTaskParentIds: ReadonlySet<string>;
@@ -227,6 +235,8 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
         subagents.push({
           id: row.id,
           parentThreadId: row.lineage.parentThreadId,
+          // A full shell carries its status; the store's index only says whether it failed.
+          failed: row.status === "failed" || row.latestRunFailed === true,
           ...(row.providerInstanceId === undefined
             ? {}
             : { providerInstanceId: row.providerInstanceId }),
@@ -404,16 +414,21 @@ function omittedIdleSubagents(
   const keptIds = new Set<string>(kept.map((thread) => thread.id));
   const byParent = new Map<
     ThreadId,
-    { readonly threadIds: Array<ThreadId>; readonly providerInstanceIds: Set<ProviderInstanceId> }
+    {
+      readonly threadIds: Array<ThreadId>;
+      readonly failedThreadIds: Array<ThreadId>;
+      readonly providerInstanceIds: Set<ProviderInstanceId>;
+    }
   >();
   for (const subagent of facts.subagents) {
     if (keptIds.has(subagent.id)) continue;
     let entry = byParent.get(subagent.parentThreadId);
     if (entry === undefined) {
-      entry = { threadIds: [], providerInstanceIds: new Set() };
+      entry = { threadIds: [], failedThreadIds: [], providerInstanceIds: new Set() };
       byParent.set(subagent.parentThreadId, entry);
     }
     entry.threadIds.push(subagent.id);
+    if (subagent.failed) entry.failedThreadIds.push(subagent.id);
     if (subagent.providerInstanceId !== undefined) {
       entry.providerInstanceIds.add(subagent.providerInstanceId);
     }
@@ -421,6 +436,7 @@ function omittedIdleSubagents(
   return Array.from(byParent, ([parentThreadId, entry]) => ({
     parentThreadId,
     threadIds: entry.threadIds,
+    ...(entry.failedThreadIds.length === 0 ? {} : { failedThreadIds: entry.failedThreadIds }),
     providerInstanceIds: [...entry.providerInstanceIds],
   }));
 }

@@ -4321,6 +4321,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               depth={descendant.depth}
                               childSummary={descendant.childSummary}
                               isExpanded={descendant.isExpanded}
+                              peek={descendant.peek}
+                              inFolder={folderRow !== undefined}
                               isActive={routeThreadKey === descendant.threadKey}
                               contextDrag={isContextDrag}
                               draggingOverNest={

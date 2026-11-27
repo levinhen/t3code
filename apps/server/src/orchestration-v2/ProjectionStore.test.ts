@@ -108,7 +108,7 @@ const traceSqlStatements = () => {
   return { statements, tracer, queryTransactions };
 };
 
-it.effect("the shell index names subagent providers and still scans its expression index", () =>
+it.effect("the shell index names subagent providers and failures and still scans its expression index", () =>
   Effect.gen(function* () {
     const store = yield* ProjectionStore.ProjectionStoreV2;
     const now = DateTime.makeUnsafe("2026-11-20T00:00:00.000Z");
@@ -151,13 +151,42 @@ it.effect("the shell index names subagent providers and still scans its expressi
       });
     yield* create(parentId, false);
     yield* create(childId, true);
+    const failedRunId = RunId.make("run:index-child:1");
+    yield* store.apply({
+      id: EventId.make("event:index-child:run-created"),
+      type: "run.created",
+      threadId: childId,
+      runId: failedRunId,
+      nodeId: NodeId.make("node:index-child"),
+      driver,
+      providerInstanceId: claude,
+      occurredAt: now,
+      payload: {
+        id: failedRunId,
+        threadId: childId,
+        ordinal: 1,
+        providerInstanceId: claude,
+        modelSelection: { instanceId: claude, model: "claude-haiku-5-5" },
+        providerThreadId: null,
+        userMessageId: MessageId.make("message:index-child"),
+        rootNodeId: NodeId.make("node:index-child"),
+        activeAttemptId: null,
+        status: "failed" as const,
+        requestedAt: now,
+        startedAt: now,
+        completedAt: now,
+        checkpointId: null,
+        contextHandoffId: null,
+      },
+    });
     const { statements, tracer } = traceSqlStatements();
     const index = yield* store.listActiveShellIndex().pipe(Effect.withTracer(tracer));
+    // A subagent the snapshot leaves out still names its provider and whether it failed.
     assert.sameDeepMembers(
-      index.map((row) => [row.id, row.providerInstanceId]),
+      index.map((row) => [row.id, row.providerInstanceId, row.latestRunFailed]),
       [
-        [parentId, undefined],
-        [childId, claude],
+        [parentId, undefined, undefined],
+        [childId, claude, true],
       ],
     );
     yield* assertShellIndexCoversShells();
@@ -239,6 +268,12 @@ const assertShellIndexCoversShells = Effect.fnUntraced(function* () {
     index.map((row) => row.providerInstanceId),
     shells.map((shell) =>
       shell.lineage.relationshipToParent === "subagent" ? shell.providerInstanceId : undefined,
+    ),
+  );
+  assert.deepEqual(
+    index.map((row) => row.latestRunFailed === true),
+    shells.map(
+      (shell) => shell.lineage.relationshipToParent === "subagent" && shell.status === "failed",
     ),
   );
   shells.forEach((shell, position) => {

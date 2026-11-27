@@ -60,6 +60,7 @@ import { ThreadHoverCard, ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { Tooltip, TooltipTrigger } from "../ui/tooltip";
 import { dropVerbBadge, type SidebarProviderEntry } from "./SidebarThreadRow";
+import { SidebarSubtreeCounts } from "./SidebarSubtreeCounts";
 import type { SidebarSubtreeSummary } from "./subagentTree";
 
 function compactTimeLabel(timestamp: string, nowMs: number, resolve: MessageResolver) {
@@ -109,18 +110,16 @@ export function SidebarThreadFamilyMount({ threadKey }: { threadKey: string }) {
   return null;
 }
 
-const SUBTREE_DOT_CLASS = {
-  attention: "bg-warning",
-  failed: "bg-error",
-  working: "bg-info",
-} as const;
-
 export interface SidebarSubagentTreeRowProps {
   readonly thread: SidebarThreadSummary;
   readonly parentKey: string;
   readonly depth: number;
   readonly childSummary: SidebarSubtreeSummary;
   readonly isExpanded: boolean;
+  /** Shown under a collapsed parent because it is running, waiting on the user, or open. */
+  readonly peek?: boolean | undefined;
+  /** Under a folder row, whose chevron sits in the gutter left of its title. */
+  readonly inFolder?: boolean | undefined;
   readonly isActive: boolean;
   readonly contextDrag?: boolean | undefined;
   readonly draggingOverNest?: boolean | undefined;
@@ -188,11 +187,14 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
           : "bg-muted-foreground/45";
 
   const hasChildren = props.childSummary.totalCount > 0;
-  const childrenLabel = gt("{count, plural, one {{count} subagent} other {{count} subagents}}", {
-    count: props.childSummary.totalCount,
-  });
+  const childrenLabel = gt(
+    "{count, plural, one {{count} nested thread} other {{count} nested threads}}",
+    { count: props.childSummary.totalCount },
+  );
   const cappedDepth = Math.min(props.depth, 5);
-  const indentPx = 12 + (cappedDepth - 1) * 14;
+  // The first guide runs under the parent's chevron.
+  const guideBasePx = props.inFolder ? 24 : 10;
+  const indentPx = guideBasePx + 2 + (cappedDepth - 1) * 14;
   const { revealRef } = props;
   const rowRef = (row: HTMLElement | null) =>
     row === null ? undefined : revealRef?.(row, threadKey);
@@ -229,6 +231,7 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
       {...drag.listeners}
       data-subagent-tree-item={threadKey}
       data-subagent-depth={props.depth}
+      data-subagent-peek={props.peek || undefined}
       style={
         isDragging && drag.transform
           ? { transform: CSS.Translate.toString(drag.transform) }
@@ -250,7 +253,7 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
           <span
             key={level}
             aria-hidden
-            style={{ left: `${10 + level * 14}px` }}
+            style={{ left: `${guideBasePx + level * 14}px` }}
             className="pointer-events-none absolute inset-y-0 w-px bg-sidebar-border/65"
           />
         ))}
@@ -348,18 +351,7 @@ export const SidebarSubagentTreeRow = memo(function SidebarSubagentTreeRow(
             {thread.title}
           </span>
           {hasChildren && !props.isExpanded ? (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-sidebar-control-surface/70 px-1 py-px text-2xs tabular-nums text-sidebar-muted-foreground">
-              {props.childSummary.attentionStatus ? (
-                <span
-                  aria-hidden
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    SUBTREE_DOT_CLASS[props.childSummary.attentionStatus],
-                  )}
-                />
-              ) : null}
-              {props.childSummary.totalCount}
-            </span>
+            <SidebarSubtreeCounts summary={props.childSummary} />
           ) : null}
           {dragDestination ?? (
             <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-2xs text-secondary-label tabular-nums">

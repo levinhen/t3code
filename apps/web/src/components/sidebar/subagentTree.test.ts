@@ -115,7 +115,9 @@ describe("sidebar subagent tree", () => {
     expect(summarizeSidebarSubtree(rootKey, byParent)).toEqual({
       totalCount: 4,
       runningCount: 0,
-      attentionStatus: null,
+      attentionCount: 0,
+      failedCount: 0,
+      doneCount: 4,
       providerInstanceIds: [codex],
       runningProviderInstanceIds: [],
     });
@@ -153,7 +155,7 @@ describe("sidebar subagent tree", () => {
     expect(canNestSidebarThread(child, root, grouped)).toBe(true);
   });
 
-  it("defaults collapsed when idle, expands on explicit toggle, and auto-expands when a descendant is active or running", () => {
+  it("defaults collapsed, expands on explicit toggle or an open descendant, and peeks running ones", () => {
     const rootId = ThreadId.make("root");
     const childId = ThreadId.make("child");
     const grandchildId = ThreadId.make("grandchild");
@@ -212,7 +214,10 @@ describe("sidebar subagent tree", () => {
       grandchildKey,
     );
     expect(explicitlyCollapsed.isExpanded).toBe(false);
-    expect(explicitlyCollapsed.rows).toEqual([]);
+    // The open thread still shows, one level under the collapsed parent.
+    expect(explicitlyCollapsed.rows.map((row) => [row.thread.id, row.depth, row.peek])).toEqual([
+      [grandchildId, 1, true],
+    ]);
 
     const runningThreads = [
       makeThread({ id: rootId }),
@@ -223,22 +228,24 @@ describe("sidebar subagent tree", () => {
       }),
     ];
     const runningByParent = buildSidebarChildThreadsByParent(runningThreads, new Set());
-    const autoRunning = collectVisibleSidebarDescendants(
+    const peekRunning = collectVisibleSidebarDescendants(
       rootKey,
       runningByParent,
       NO_IDLE,
       {},
       null,
     );
-    expect(autoRunning.isExpanded).toBe(true);
-    expect(autoRunning.summary).toEqual({
+    expect(peekRunning.isExpanded).toBe(false);
+    expect(peekRunning.summary).toEqual({
       totalCount: 1,
       runningCount: 1,
-      attentionStatus: "working",
+      attentionCount: 0,
+      failedCount: 0,
+      doneCount: 0,
       providerInstanceIds: [codex],
       runningProviderInstanceIds: [codex],
     });
-    expect(autoRunning.rows.map((row) => row.threadKey)).toEqual([childKey]);
+    expect(peekRunning.rows.map((row) => [row.threadKey, row.peek])).toEqual([[childKey, true]]);
   });
 
   it("counts and names the idle children the shell left out before and after their rows load", () => {
@@ -249,13 +256,25 @@ describe("sidebar subagent tree", () => {
     const childKey = scopedThreadKey(scopeThreadRef(localEnv, childId));
     const otherKey = scopedThreadKey(scopeThreadRef(localEnv, otherId));
     const idle = new Map<string, IdleSubagentChildren>([
-      [rootKey, { threadKeys: [childKey, otherKey], providerInstanceIds: [claude] }],
+      [
+        rootKey,
+        {
+          threadKeys: [childKey, otherKey],
+          failedThreadKeys: new Set([otherKey]),
+          providerInstanceIds: [claude],
+        },
+      ],
     ]);
     const shellOnly = buildSidebarChildThreadsByParent([makeThread({ id: rootId })], NONE);
 
     const collapsed = collectVisibleSidebarDescendants(rootKey, shellOnly, idle, {}, null);
-    expect(collapsed).toMatchObject({ isExpanded: false, familyKeys: [] });
-    expect(collapsed.summary).toMatchObject({ totalCount: 2, providerInstanceIds: [claude] });
+    expect(collapsed).toMatchObject({ isExpanded: false, rows: [], familyKeys: [] });
+    expect(collapsed.summary).toMatchObject({
+      totalCount: 2,
+      failedCount: 1,
+      doneCount: 1,
+      providerInstanceIds: [claude],
+    });
 
     const loading = collectVisibleSidebarDescendants(
       rootKey,
@@ -284,7 +303,7 @@ describe("sidebar subagent tree", () => {
       null,
     );
     // A loaded child is not counted again, and the parent keeps its family mounted.
-    expect(partly.summary.totalCount).toBe(2);
+    expect(partly.summary).toMatchObject({ totalCount: 2, failedCount: 1, doneCount: 1 });
     expect(partly.rows.map((row) => row.threadKey)).toEqual([childKey]);
     expect(partly.familyKeys).toEqual([rootKey]);
   });
@@ -315,6 +334,7 @@ describe("sidebar subagent tree", () => {
         childKey("codex-grandchild"),
         {
           threadKeys: [childKey("idle-gemini")],
+          failedThreadKeys: new Set(),
           providerInstanceIds: [ProviderInstanceId.make("gemini")],
         },
       ],
@@ -332,6 +352,68 @@ describe("sidebar subagent tree", () => {
     expect([...summary.providerInstanceIds].toSorted()).toEqual(
       [claude, codex, ProviderInstanceId.make("gemini")].toSorted(),
     );
+  });
+
+  it("counts each state apart and peeks the running and waiting ones in tree order", () => {
+    const rootId = ThreadId.make("root");
+    const rootKey = scopedThreadKey(scopeThreadRef(localEnv, rootId));
+    const id = (name: string) => ThreadId.make(name);
+    const under = (parent: ThreadId) => ({
+      rootThreadId: rootId,
+      parentThreadId: parent,
+      relationshipToParent: "subagent" as const,
+    });
+    const threads = [
+      makeThread({ id: rootId, createdAt: "2026-03-09T10:00:00.000Z" }),
+      makeThread({
+        id: id("done"),
+        lineage: under(rootId),
+      }),
+      makeThread({
+        id: id("needs-approval"),
+        hasPendingApprovals: true,
+        lineage: under(id("done")),
+      }),
+      makeThread({
+        id: id("failed"),
+        runtime: { ...running(codex), status: "failed" },
+        lineage: under(rootId),
+      }),
+      makeThread({
+        id: id("running"),
+        runtime: running(codex),
+        lineage: under(rootId),
+      }),
+    ];
+    const byParent = buildSidebarChildThreadsByParent(threads, NONE);
+
+    const collapsed = collectVisibleSidebarDescendants(rootKey, byParent, NO_IDLE, {}, null);
+    expect(collapsed.summary).toMatchObject({
+      totalCount: 4,
+      attentionCount: 1,
+      runningCount: 1,
+      failedCount: 1,
+      doneCount: 1,
+    });
+    expect(collapsed.rows.map((row) => [row.thread.id, row.depth, row.peek])).toEqual([
+      [id("needs-approval"), 1, true],
+      [id("running"), 1, true],
+    ]);
+
+    // Expanded, a collapsed child peeks its own waiting descendant one level under it.
+    const expanded = collectVisibleSidebarDescendants(
+      rootKey,
+      byParent,
+      NO_IDLE,
+      { [rootKey]: true },
+      null,
+    );
+    expect(expanded.rows.map((row) => [row.thread.id, row.depth, row.peek])).toEqual([
+      [id("done"), 1, false],
+      [id("needs-approval"), 2, true],
+      [id("failed"), 1, false],
+      [id("running"), 1, false],
+    ]);
   });
 
   it("handles parent cycles safely without looping", () => {

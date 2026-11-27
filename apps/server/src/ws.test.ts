@@ -815,6 +815,7 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
       { ...shell("old-grouped", null, null, 60), taskGroupId },
       shell("remote-parent", null, null, 40),
       shell("remote-child-parent", "parent", null),
+      { ...shell("idle-failed", "parent", null), status: "failed" },
     ];
     const firstSnapshot = (input: {
       readonly omitIdleSubagents?: boolean;
@@ -883,7 +884,10 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
     assert.deepEqual(withoutChildren?.idleSubagents, [
       {
         parentThreadId: ThreadId.make("parent"),
-        threadIds: ["idle", "idle-claude", "idle-repeat"].map((id) => ThreadId.make(id)),
+        threadIds: ["idle", "idle-claude", "idle-repeat", "idle-failed"].map((id) =>
+          ThreadId.make(id),
+        ),
+        failedThreadIds: [ThreadId.make("idle-failed")],
         providerInstanceIds: [
           ProviderInstanceId.make("codex"),
           ProviderInstanceId.make("claudeAgent"),

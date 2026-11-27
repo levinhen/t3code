@@ -521,6 +521,8 @@ export interface ActiveShellIndexEntry extends Pick<
 > {
   /** Read for subagents only, which a shell snapshot can leave out and still name by provider. */
   readonly providerInstanceId?: ProviderInstanceId;
+  /** Read for subagents only, so a left-out one still counts as failed. */
+  readonly latestRunFailed?: boolean;
   /** False only when no run, request, work item, or watch can make the shell live. */
   readonly mayBeLive: boolean;
   /** Whether it delegated a task to a linked environment, whose clients nest that task under it. */
@@ -9615,6 +9617,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly pin_order_key: string | null;
         readonly snoozed_until: string | null;
         readonly provider_instance_id: string | null;
+        readonly latest_run_failed: number | null;
         readonly sidebar_parent_kind: string | null;
         readonly sidebar_parent_id: string | null;
         readonly task_group_id: string | null;
@@ -9641,6 +9644,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           CASE WHEN ${indexedField("$.lineage.relationshipToParent")} = 'subagent'
             THEN json_extract(t.payload_json, '$.providerInstanceId')
           END AS provider_instance_id,
+          -- The run the shell presents, so a left-out subagent fails exactly when its shell would.
+          CASE WHEN ${indexedField("$.lineage.relationshipToParent")} = 'subagent'
+            THEN (
+              SELECT presented.status = 'failed' FROM orchestration_v2_projection_runs presented
+              WHERE presented.run_id = ${presentedShellRunId(sql.literal("t.thread_id"))}
+            )
+          END AS latest_run_failed,
           -- A superset of isLiveSubagentShell: the sources of its run status, pending request,
           -- and pending background work. Each source is one list for the whole read, found
           -- through its partial index, so finished threads cost no lookups.
@@ -9699,6 +9709,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         ...(row.provider_instance_id === null
           ? {}
           : { providerInstanceId: ProviderInstanceId.make(row.provider_instance_id) }),
+        ...(row.latest_run_failed === 1 ? { latestRunFailed: true } : {}),
         taskGroupId: row.task_group_id === null ? null : TaskGroupId.make(row.task_group_id),
         sidebarParent:
           row.sidebar_parent_kind === "top_level"

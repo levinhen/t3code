@@ -30,7 +30,12 @@ export type SidebarTreeThread = Pick<
 export interface SidebarSubtreeSummary {
   readonly totalCount: number;
   readonly runningCount: number;
-  readonly attentionStatus: "attention" | "failed" | "working" | null;
+  /** Waiting on the user: an approval, an answer, or a guest's message. */
+  readonly attentionCount: number;
+  /** Failed, or stopped at a usage limit. */
+  readonly failedCount: number;
+  /** Finished, or never ran. */
+  readonly doneCount: number;
   /** Every provider in the subtree, in the order the walk meets them. */
   readonly providerInstanceIds: ReadonlyArray<ProviderInstanceId>;
   /** The providers of its working threads. */
@@ -44,12 +49,16 @@ export interface SidebarDescendantRow<T extends SidebarTreeThread> {
   readonly depth: number;
   readonly childSummary: SidebarSubtreeSummary;
   readonly isExpanded: boolean;
+  /** Shown under a collapsed ancestor because it is running, waiting on the user, or open. */
+  readonly peek: boolean;
 }
 
 const EMPTY_SUBTREE_SUMMARY: SidebarSubtreeSummary = {
   totalCount: 0,
   runningCount: 0,
-  attentionStatus: null,
+  attentionCount: 0,
+  failedCount: 0,
+  doneCount: 0,
   providerInstanceIds: [],
   runningProviderInstanceIds: [],
 };
@@ -63,19 +72,48 @@ const sidebarThreadProviderInstanceId = (
   thread: Pick<SidebarTreeThread, "runtime" | "modelSelection">,
 ) => thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
 
+/** Where a thread counts in its parent's summary. */
+export type SidebarSubtreeState = "running" | "attention" | "failed" | "done";
+
+export function sidebarSubtreeState(thread: SidebarTreeThread): SidebarSubtreeState {
+  switch (resolveSidebarThreadStatus(thread)) {
+    case "working":
+    case "preparing":
+      return "running";
+    case "waiting":
+      // Blocked on a thread of its own, so its turn is still going.
+      return thread.runtime?.status === "running" ? "running" : "done";
+    case "approval":
+    case "input":
+    case "request":
+      return "attention";
+    case "failed":
+    case "limited":
+      return "failed";
+    case "ready":
+      return "done";
+  }
+}
+
 /** The idle children the shell left out that no loaded row stands for yet. */
 function unloadedIdleChildren<T extends SidebarTreeThread>(
   parentKey: string,
   children: readonly T[] | undefined,
   idleChildren: ReadonlyMap<string, IdleSubagentChildren>,
-): { readonly count: number; readonly entry: IdleSubagentChildren | undefined } {
+): {
+  readonly count: number;
+  readonly failedCount: number;
+  readonly entry: IdleSubagentChildren | undefined;
+} {
   const entry = idleChildren.get(parentKey);
-  if (entry === undefined) return { count: 0, entry };
-  if (children === undefined || children.length === 0) {
-    return { count: entry.threadKeys.length, entry };
-  }
-  const loaded = new Set(children.map(treeThreadKey));
-  return { count: entry.threadKeys.filter((key) => !loaded.has(key)).length, entry };
+  if (entry === undefined) return { count: 0, failedCount: 0, entry };
+  const loaded = new Set((children ?? []).map(treeThreadKey));
+  const unloaded = entry.threadKeys.filter((key) => !loaded.has(key));
+  return {
+    count: unloaded.length,
+    failedCount: unloaded.filter((key) => entry.failedThreadKeys.has(key)).length,
+    entry,
+  };
 }
 
 function resolveSidebarTreeParentKey(
@@ -143,13 +181,15 @@ export function summarizeSidebarSubtree<T extends SidebarTreeThread>(
 
   let totalCount = 0;
   let runningCount = 0;
-  let hasAttention = false;
-  let hasFailed = false;
+  let attentionCount = 0;
+  let failedCount = 0;
   const providers = new Set<ProviderInstanceId>();
   const runningProviders = new Set<ProviderInstanceId>();
+  // The shell leaves out only children that cannot be live, so these are finished or failed.
   const addIdle = (idle: ReturnType<typeof unloadedIdleChildren>) => {
     if (idle.count === 0 || idle.entry === undefined) return;
     totalCount += idle.count;
+    failedCount += idle.failedCount;
     for (const providerInstanceId of idle.entry.providerInstanceIds)
       providers.add(providerInstanceId);
   };
@@ -166,19 +206,14 @@ export function summarizeSidebarSubtree<T extends SidebarTreeThread>(
     const providerInstanceId = sidebarThreadProviderInstanceId(child);
     providers.add(providerInstanceId);
 
-    const status = resolveSidebarThreadStatus(child);
-    if (status === "working" || status === "preparing") {
+    const state = sidebarSubtreeState(child);
+    if (state === "running") {
       runningCount += 1;
       runningProviders.add(providerInstanceId);
-    } else if (
-      status === "approval" ||
-      status === "input" ||
-      status === "request" ||
-      status === "limited"
-    ) {
-      hasAttention = true;
-    } else if (status === "failed") {
-      hasFailed = true;
+    } else if (state === "attention") {
+      attentionCount += 1;
+    } else if (state === "failed") {
+      failedCount += 1;
     }
 
     const nested = childrenByParent.get(childKey);
@@ -191,27 +226,21 @@ export function summarizeSidebarSubtree<T extends SidebarTreeThread>(
   return {
     totalCount,
     runningCount,
-    attentionStatus: hasAttention
-      ? "attention"
-      : hasFailed
-        ? "failed"
-        : runningCount > 0
-          ? "working"
-          : null,
+    attentionCount,
+    failedCount,
+    doneCount: totalCount - runningCount - attentionCount - failedCount,
     providerInstanceIds: [...providers],
     runningProviderInstanceIds: [...runningProviders],
   };
 }
 
+/** Running children show under a collapsed parent, so only an open descendant expands it. */
 function isSidebarSubtreeExpanded(
   threadKey: string,
   expandedById: Readonly<Record<string, boolean>>,
-  summary: SidebarSubtreeSummary,
   hasActiveDescendant: boolean,
 ): boolean {
-  const explicit = expandedById[threadKey];
-  if (explicit !== undefined) return explicit;
-  return summary.runningCount > 0 || hasActiveDescendant;
+  return expandedById[threadKey] ?? hasActiveDescendant;
 }
 
 function collectActiveAncestors<T extends SidebarTreeThread>(
@@ -264,35 +293,47 @@ export function collectVisibleSidebarDescendants<T extends SidebarTreeThread>(
   }
 
   const activeAncestors = collectActiveAncestors(rootKey, childrenByParent, routeThreadKey);
-  const rootExpanded = isSidebarSubtreeExpanded(
-    rootKey,
-    expandedById,
-    summary,
-    activeAncestors.has(rootKey),
-  );
-  if (!rootExpanded) {
-    return { summary, isExpanded: false, rows: [], familyKeys: [] };
+  const rows: SidebarDescendantRow<T>[] = [];
+  const visited = new Set<string>([rootKey]);
+  // Every descendant of a collapsed parent that is running, waiting on the user, or open, one
+  // level under it: a peek row has no subtree of its own to open.
+  const peek = (parentKey: string, depth: number) => {
+    for (const child of childrenByParent.get(parentKey) ?? []) {
+      const childKey = treeThreadKey(child);
+      if (visited.has(childKey)) continue;
+      visited.add(childKey);
+      const state = sidebarSubtreeState(child);
+      if (state === "running" || state === "attention" || childKey === routeThreadKey) {
+        rows.push({
+          thread: child,
+          threadKey: childKey,
+          parentKey,
+          depth,
+          childSummary: EMPTY_SUBTREE_SUMMARY,
+          isExpanded: false,
+          peek: true,
+        });
+      }
+      peek(childKey, depth);
+    }
+  };
+  if (!isSidebarSubtreeExpanded(rootKey, expandedById, activeAncestors.has(rootKey))) {
+    peek(rootKey, 1);
+    return { summary, isExpanded: false, rows, familyKeys: [] };
   }
 
-  const rows: SidebarDescendantRow<T>[] = [];
   const familyKeys = idleChildren.has(rootKey) ? [rootKey] : [];
-  const visited = new Set<string>([rootKey]);
   const walk = (parentKey: string, depth: number) => {
     const children = childrenByParent.get(parentKey);
     if (!children) return;
     for (const child of children) {
-      const childKey = scopedThreadKey(scopeThreadRef(child.environmentId, child.id));
+      const childKey = treeThreadKey(child);
       if (visited.has(childKey)) continue;
       visited.add(childKey);
       const childSummary = summarizeSidebarSubtree(childKey, childrenByParent, idleChildren);
       const childExpanded =
         childSummary.totalCount > 0 &&
-        isSidebarSubtreeExpanded(
-          childKey,
-          expandedById,
-          childSummary,
-          activeAncestors.has(childKey),
-        );
+        isSidebarSubtreeExpanded(childKey, expandedById, activeAncestors.has(childKey));
       if (childExpanded && idleChildren.has(childKey)) familyKeys.push(childKey);
       rows.push({
         thread: child,
@@ -301,9 +342,12 @@ export function collectVisibleSidebarDescendants<T extends SidebarTreeThread>(
         depth,
         childSummary,
         isExpanded: childExpanded,
+        peek: false,
       });
       if (childExpanded) {
         walk(childKey, depth + 1);
+      } else {
+        peek(childKey, depth + 1);
       }
     }
   };
