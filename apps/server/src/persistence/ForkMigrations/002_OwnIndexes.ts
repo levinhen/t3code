@@ -10,7 +10,11 @@ export default Effect.gen(function* () {
 
   // Earlier fork builds redefined these two upstream indexes. Restore upstream's definitions
   // (migration 98 and the V2 sequence indexes) only where the fork's are still in place.
-  if (/sidebarParent|taskGroupId/u.test(yield* definition("orchestration_v2_projection_threads_active_shell_idx"))) {
+  if (
+    /sidebarParent|taskGroupId/u.test(
+      yield* definition("orchestration_v2_projection_threads_active_shell_idx"),
+    )
+  ) {
     yield* sql`DROP INDEX orchestration_v2_projection_threads_active_shell_idx`;
     yield* sql`
       CREATE INDEX orchestration_v2_projection_threads_active_shell_idx
@@ -32,7 +36,9 @@ export default Effect.gen(function* () {
       WHERE deleted_at IS NULL AND archived_at IS NULL
     `;
   }
-  if ((yield* definition("idx_orchestration_events_application_high_water")).includes("task_group")) {
+  if (
+    (yield* definition("idx_orchestration_events_application_high_water")).includes("task_group")
+  ) {
     yield* sql`DROP INDEX idx_orchestration_events_application_high_water`;
     yield* sql`
       CREATE INDEX idx_orchestration_events_application_high_water
