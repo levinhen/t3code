@@ -2130,7 +2130,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   };
 
   const isContextDrag = dragState?.contextDrag === true;
-  const dragTargetSection = isContextDrag ? null : (dragState?.targetSection ?? null);
+  const dragTargetSection =
+    isContextDrag ||
+    (projectFolders !== null && dragState !== null && sectionByThreadKey.has(dragState.activeKey))
+      ? null
+      : (dragState?.targetSection ?? null);
   const finishThreadDrag = (started: boolean) => {
     dragSensorRef.current = null;
     contextDragKeyRef.current = null;
@@ -2330,7 +2334,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const viewport = list?.closest('[data-slot="scroll-area-viewport"]');
     dragScrollRef.current = viewport ? { viewport, top: viewport.scrollTop } : null;
     const header = list?.querySelector<HTMLElement>('[data-testid="sidebar-pinned-header"]');
-    if (list && header) {
+    if (list && header && projectFolders === null) {
       const listRect = list.getBoundingClientRect();
       const scale = list.offsetWidth > 0 ? listRect.width / list.offsetWidth : 1;
       dragLabelOffsetRef.current =
@@ -2595,14 +2599,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           activeThreads,
           workingShelfEnabled,
         });
+  const listSortingEnabled =
+    !isContextDrag &&
+    dragState?.nestTarget == null &&
+    dragState?.joinTarget == null &&
+    dragState?.groupDropTarget == null &&
+    projectFolders === null;
   const sidebarSortingStrategy = createSidebarSortingStrategy({
     items: sidebarListItems,
-    enabled:
-      !isContextDrag &&
-      dragState?.nestTarget == null &&
-      dragState?.joinTarget == null &&
-      dragState?.groupDropTarget == null &&
-      projectFolders === null,
+    enabled: listSortingEnabled,
     boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
     settledOrder: draggedSettledOrder,
     ...(draggedActiveOrder === undefined ? {} : { activeOrder: draggedActiveOrder }),
@@ -4360,14 +4365,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           );
                         }
                       };
-                      // Over a row or a group the list holds still, so section labels would
-                      // land on the rows; they come back once the pointer leaves the target.
+                      // Whenever list sorting is disabled the rows hold still, so section
+                      // boundary labels would overlap each other and the rows.
                       const from =
-                        isContextDrag ||
-                        dragState?.activeSection === "working" ||
-                        dragState?.nestTarget != null ||
-                        dragState?.joinTarget != null ||
-                        dragState?.groupDropTarget != null
+                        !listSortingEnabled || dragState?.activeSection === "working"
                           ? null
                           : (dragState?.activeSection ?? null);
                       const items: ReactNode[] = [

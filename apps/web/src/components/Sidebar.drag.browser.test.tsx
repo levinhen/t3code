@@ -34,7 +34,7 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   trackRpcRequestSent: () => {},
 }));
 
-it("shows the titled preview inside and outside search results from a collapsed folder", async () => {
+it("hides section boundaries when dragging in a folder and keeps the preview from search results", async () => {
   await page.viewport(1400, 900);
   const [first, second] = [threadWithHistory("visible", 1), threadWithHistory("search-target", 1)];
   using _environment = installFakeEnvironment([first, second]);
@@ -56,14 +56,6 @@ it("shows the titled preview inside and outside search results from a collapsed 
   // A removed row fades out as a clone without its test id, so match the live row only.
   const secondRow = page.getByTestId("sidebar-row-folder").filter({ hasText: second.title });
   await expect.element(secondRow).toBeInTheDocument();
-  // The shift guard drops pointer presses on a row that appeared under 500ms ago; keys pass.
-  folder.element().focus();
-  await userEvent.keyboard("{Enter}");
-  await expect.element(secondRow).not.toBeInTheDocument();
-  await userEvent.fill(page.getByRole("combobox", { name: "Search threads" }), "search-target");
-  const result = page.getByRole("option", { name: /Thread search-target/ });
-  await expect.element(result).toBeVisible();
-  const bounds = result.element().getBoundingClientRect();
   const pointer = (type: string, x: number, y: number) =>
     new PointerEvent(type, {
       bubbles: true,
@@ -78,6 +70,40 @@ it("shows the titled preview inside and outside search results from a collapsed 
   using _release = {
     [Symbol.dispose]: () => document.dispatchEvent(pointer("pointerup", -100, 100)),
   };
+  const rowBounds = secondRow.element().getBoundingClientRect();
+  const rowDragX = rowBounds.x + 10;
+  const rowStartY = rowBounds.y + rowBounds.height / 2;
+  await act(() => {
+    secondRow.element().dispatchEvent(pointer("pointerdown", rowDragX, rowStartY));
+    document.dispatchEvent(pointer("pointermove", rowDragX, rowStartY - 40));
+  });
+  await vi.waitFor(() => {
+    expect(secondRow.element().closest("ul")?.style.getPropertyValue("--sidebar-drag-y")).toBe(
+      "-40px",
+    );
+  });
+  expect(
+    document.querySelectorAll(
+      '[data-testid="sidebar-pinned-header"] .sidebar-drag-boundary-label, [data-testid="sidebar-pinned-divider"] .sidebar-drag-boundary-label',
+    ),
+  ).toHaveLength(0);
+  await act(() => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", bubbles: true }));
+    document.dispatchEvent(pointer("pointerup", rowDragX, rowStartY - 40));
+    // Synthetic pointerup does not emit the post-release click that clears SidebarPointerSensor's click guard.
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  await vi.waitFor(() => {
+    expect(secondRow.element().closest("ul")?.style.getPropertyValue("--sidebar-drag-y")).toBe("");
+  });
+  // The shift guard drops pointer presses on a row that appeared under 500ms ago; keys pass.
+  folder.element().focus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(secondRow).not.toBeInTheDocument();
+  await userEvent.fill(page.getByRole("combobox", { name: "Search threads" }), "search-target");
+  const result = page.getByRole("option", { name: /Thread search-target/ });
+  await expect.element(result).toBeVisible();
+  const bounds = result.element().getBoundingClientRect();
   await act(() => {
     result.element().dispatchEvent(pointer("pointerdown", bounds.x + 10, bounds.y + 10));
     document.dispatchEvent(pointer("pointermove", bounds.x + 30, bounds.y + 10));
