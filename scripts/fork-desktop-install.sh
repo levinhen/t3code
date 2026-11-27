@@ -38,10 +38,23 @@ while pgrep -qf '/Applications/T3 Code \(Fork\)\.app/Contents/MacOS/'; do
 done
 
 # The fork applies newer migrations to the shared database; keep a copy from before this build.
-if [ -f "$HOME/.t3/userdata/statev2.sqlite" ]; then
+db="$HOME/.t3/userdata/statev2.sqlite"
+if [ -f "$db" ]; then
   mkdir -p "$backup_dir"
-  sqlite3 -readonly "$HOME/.t3/userdata/statev2.sqlite" \
-    ".backup '$backup_dir/statev2-before-fork-$build_version.sqlite'"
+  tmp="$backup_dir/.partial.sqlite"
+  rm -f "$tmp" "$tmp-wal" "$tmp-shm"
+  if [ -f "$db-wal" ] && [ -f "$db-shm" ]; then
+    sqlite3 -readonly "$db" ".backup '$tmp'"
+  else
+    # A closed WAL database has no -shm, so sqlite3 -readonly cannot open it.
+    cp "$db" "$tmp"
+    if [ -f "$db-wal" ]; then
+      cp "$db-wal" "$tmp-wal"
+    fi
+  fi
+  sqlite3 "$tmp" "PRAGMA journal_mode=DELETE;" >/dev/null
+  rm -f "$tmp-wal" "$tmp-shm"
+  mv "$tmp" "$backup_dir/statev2-before-fork-$build_version.sqlite"
 fi
 
 rm -rf "$dest"
