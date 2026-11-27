@@ -73,9 +73,9 @@ const sidebarThreadProviderInstanceId = (
 ) => thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
 
 /** Where a thread counts in its parent's summary. */
-export type SidebarSubtreeState = "running" | "attention" | "failed" | "done";
+type SidebarSubtreeState = "running" | "attention" | "failed" | "done";
 
-export function sidebarSubtreeState(thread: SidebarTreeThread): SidebarSubtreeState {
+function sidebarSubtreeState(thread: SidebarTreeThread): SidebarSubtreeState {
   switch (resolveSidebarThreadStatus(thread)) {
     case "working":
     case "preparing":

@@ -108,7 +108,7 @@ const traceSqlStatements = () => {
   return { statements, tracer, queryTransactions };
 };
 
-it.effect("the shell index names subagent providers and failures and still scans its expression index", () =>
+it.effect("the shell index names subagent providers and still scans its expression index", () =>
   Effect.gen(function* () {
     const store = yield* ProjectionStore.ProjectionStoreV2;
     const now = DateTime.makeUnsafe("2026-11-20T00:00:00.000Z");
