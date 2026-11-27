@@ -197,6 +197,7 @@ it.effect("the shell index names subagent providers and still scans its expressi
       [],
     )).map((row) => row.detail);
     assert.include(plan, "SCAN t USING INDEX orchestration_v2_projection_threads_active_shell_idx");
+    assert.include(plan, "SCAN t USING INDEX fork_projection_threads_sidebar_idx");
   }).pipe(Effect.provide(layerTest)),
 );
 

@@ -9593,7 +9593,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return rows[0]?.count ?? 0;
     }, Effect.mapError(shellSnapshotReadError));
 
-    // Migration 112 indexes these exact expressions, so the read takes them from the index instead
+    // Migration 98 indexes these exact expressions, so the read takes them from the index instead
     // of parsing every active thread's payload. Changing one here needs a matching index change.
     const indexedField = (path: string, read: "json_extract" | "json_type" = "json_extract") =>
       sql.literal(
@@ -9624,6 +9624,22 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly may_be_live: number;
         readonly has_remote_tasks: number;
       }>`
+        -- The fork reads its sidebar fields through its own partial index (fork migration 2), so
+        -- upstream's shell index keeps upstream's definition.
+        WITH fork_sidebar AS MATERIALIZED (
+          SELECT
+            t.thread_id,
+            ${indexedField("$.sidebarParent.kind")} AS sidebar_parent_kind,
+            ${indexedField("$.sidebarParent.threadId")} AS sidebar_parent_id,
+            ${indexedField("$.taskGroupId")} AS task_group_id
+          FROM orchestration_v2_projection_threads t
+          WHERE t.deleted_at IS NULL
+            AND t.archived_at IS NULL
+            AND (
+              ${indexedField("$.sidebarParent.kind")} IS NOT NULL
+              OR ${indexedField("$.taskGroupId")} IS NOT NULL
+            )
+        )
         SELECT
           t.thread_id,
           t.project_id,
@@ -9636,9 +9652,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           ${indexedField("$.pinnedAt")} AS pinned_at,
           ${indexedField("$.pinOrderKey")} AS pin_order_key,
           ${indexedField("$.snoozedUntil")} AS snoozed_until,
-          ${indexedField("$.sidebarParent.kind")} AS sidebar_parent_kind,
-          ${indexedField("$.sidebarParent.threadId")} AS sidebar_parent_id,
-          ${indexedField("$.taskGroupId")} AS task_group_id,
+          fork_sidebar.sidebar_parent_kind,
+          fork_sidebar.sidebar_parent_id,
+          fork_sidebar.task_group_id,
           -- Only a subagent reads its payload, as a pull request link does below: a snapshot can
           -- leave it out and still name its provider.
           CASE WHEN ${indexedField("$.lineage.relationshipToParent")} = 'subagent'
@@ -9699,6 +9715,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               AND json_type(subagent.payload_json, '$.remoteChild') = 'object'
           ) AS has_remote_tasks
         FROM orchestration_v2_projection_threads t
+        LEFT JOIN fork_sidebar ON fork_sidebar.thread_id = t.thread_id
         WHERE t.deleted_at IS NULL
           AND t.archived_at IS NULL
         ORDER BY t.updated_at ASC, t.thread_id ASC

@@ -479,12 +479,13 @@ const makeEventStore = Effect.gen(function* () {
         correlation_id
       FROM orchestration_events
       ${
-        // Otherwise the sequence index wins and command lookups scan every V2 event.
+        // Otherwise the sequence index wins and command lookups scan every V2 event. The fork's
+        // high-water index also covers task_group events; upstream's keeps upstream's definition.
         input.commandId !== undefined
           ? sql`INDEXED BY idx_orch_events_command_id`
           : input.onlyAgentEvents === true
             ? sql``
-            : sql`INDEXED BY idx_orchestration_events_application_high_water`
+            : sql`INDEXED BY fork_orchestration_events_application_high_water`
       }
       WHERE sequence > ${input.afterSequence}
         AND sequence <= ${input.throughSequence ?? Number.MAX_SAFE_INTEGER}
@@ -694,7 +695,7 @@ const makeEventStore = Effect.gen(function* () {
       SELECT
         COUNT(*) AS "eventCount",
         COALESCE(SUM(octet_length(${restoredPayloadJson})), 0) AS "rawPayloadBytes"
-      FROM orchestration_events INDEXED BY idx_orchestration_events_application_high_water
+      FROM orchestration_events INDEXED BY fork_orchestration_events_application_high_water
       WHERE sequence > ${input.afterSequence}
         AND sequence <= ${input.throughSequence}
         AND (
@@ -734,7 +735,7 @@ const makeEventStore = Effect.gen(function* () {
   // The OR planner otherwise scans every V2 event instead of seeking the final sequence.
   const latestApplicationSequence = sql<{ readonly sequence: number | null }>`
     SELECT MAX(sequence) AS sequence
-    FROM orchestration_events INDEXED BY idx_orchestration_events_application_high_water
+    FROM orchestration_events INDEXED BY fork_orchestration_events_application_high_water
     WHERE aggregate_kind IN ('project', 'task_group')
       OR (application_event_version = 2 AND aggregate_kind = 'thread')
   `.pipe(

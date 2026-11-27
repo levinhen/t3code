@@ -3,13 +3,17 @@ import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import ForkTaskGroups from "./ForkMigrations/001_TaskGroups.ts";
+import ForkOwnIndexes from "./ForkMigrations/002_OwnIndexes.ts";
 
 // The migrator skips every id up to the highest recorded, so fork ids in effect_sql_migrations
-// would swallow upstream's next migrations. Fork schema runs after upstream's, in its own ledger.
-// When an upstream migration rebuilds an index a fork migration redefined, re-merge it in a new one.
+// would swallow upstream's next migrations. Fork schema runs after upstream's, in its own ledger,
+// and never redefines an upstream table or index: fork reads use fork-named indexes.
 const FORK_LEDGER = "fork_sql_migrations";
 
-const forkMigrationEntries = [[1, "TaskGroups", ForkTaskGroups]] as const;
+const forkMigrationEntries = [
+  [1, "TaskGroups", ForkTaskGroups],
+  [2, "OwnIndexes", ForkOwnIndexes],
+] as const;
 const forkHead = Math.max(...forkMigrationEntries.map(([id]) => id));
 
 const run = Migrator.make({});
