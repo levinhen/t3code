@@ -4509,6 +4509,8 @@
   "712124b07c357894": "Enter a path relative to the thread's workspace. A file already at that path is replaced.",
   "b9ae72204740bcdf": "{modelDescription} subagent, {statusLabel}. It runs on its own and cannot take messages.",
   "ee803c266b85aada": "Work",
+  "d7b3152c7ed523f5": "Continue",
+  "d31fad30d9ae6fcd": "Continue in new thread",
   "e918897e4a19585a": "Open parent",
   "639128685ed19f0f": [
     {
@@ -5005,6 +5007,8 @@
   "378c3404c430fc05": "Same as /side",
   "08aa54cb113f64b1": "Start a fresh session",
   "2a6969164260cdee": "Pull requests are unavailable for this project.",
+  "a95f77b12087ec48": "Could not continue the subagent in a new thread",
+  "409087a011d905eb": "The thread was created, but it did not reach this device.",
   "a0ce478324829283": "{term, select, mr {Couldn't link this merge request} cr {Couldn't link this change request} other {Couldn't link this pull request}}",
   "962d13f9565f189b": "{term, select, mr {Couldn't unlink this merge request} cr {Couldn't unlink this change request} other {Couldn't unlink this pull request}}",
   "0f9053e44ef763ec": "{term, select, mr {Paste a merge request URL, or enter 123 / #123 for this thread's repository.} cr {Paste a change request URL, or enter 123 / #123 for this thread's repository.} other {Paste a pull request URL, or enter 123 / #123 for this thread's repository.}}",

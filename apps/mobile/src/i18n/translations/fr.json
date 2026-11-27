@@ -4501,6 +4501,8 @@
   "712124b07c357894": "Saisissez un chemin relatif à l’espace de travail du fil. Un fichier existant à ce chemin sera remplacé.",
   "b9ae72204740bcdf": "Sous-agent {modelDescription}, {statusLabel}. Il travaille seul et ne peut pas recevoir de messages.",
   "ee803c266b85aada": "Travail",
+  "d7b3152c7ed523f5": "Continuer",
+  "d31fad30d9ae6fcd": "Continuer dans un nouveau fil",
   "e918897e4a19585a": "Ouvrir le parent",
   "639128685ed19f0f": [
     {
@@ -4997,6 +4999,8 @@
   "378c3404c430fc05": "Identique à /side",
   "08aa54cb113f64b1": "Démarrer une nouvelle session",
   "2a6969164260cdee": "Les pull requests ne sont pas disponibles pour ce projet.",
+  "a95f77b12087ec48": "Impossible de continuer le sous-agent dans un nouveau fil",
+  "409087a011d905eb": "Le fil a été créé, mais il n'a pas atteint cet appareil.",
   "a0ce478324829283": "{term, select, mr {Impossible d’associer cette merge request} cr {Impossible d’associer cette demande de modification} other {Impossible d’associer cette pull request}}",
   "962d13f9565f189b": "{term, select, mr {Impossible de dissocier cette merge request} cr {Impossible de dissocier cette demande de modification} other {Impossible de dissocier cette pull request}}",
   "0f9053e44ef763ec": "{term, select, mr {Collez l’URL d’une merge request, ou saisissez 123 / #123 pour le dépôt de ce fil.} cr {Collez l’URL d’une demande de modification, ou saisissez 123 / #123 pour le dépôt de ce fil.} other {Collez l’URL d’une pull request, ou saisissez 123 / #123 pour le dépôt de ce fil.}}",

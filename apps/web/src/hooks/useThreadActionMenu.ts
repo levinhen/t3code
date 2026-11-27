@@ -10,6 +10,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
+import { sideThreadKindOf } from "@t3tools/client-runtime/side-thread";
 import {
   AuthOrchestrationOperateScope,
   type ScopedThreadRef,
@@ -50,6 +51,7 @@ import {
 } from "@t3tools/client-runtime/state/project-grouping";
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
+import { useContinueSubagent } from "./useContinueSubagent";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
@@ -97,6 +99,7 @@ export function useThreadActionMenu(input: {
     turnThreadIntoProject,
   } = useThreadActions();
   const setSidebarParent = useOrchestrationCommand(threadEnvironment.setSidebarParent);
+  const continueSubagent = useContinueSubagent();
   const taskGroupActions = useTaskGroupActions();
   const regenerateThreadTitle = useOrchestrationCommand(threadEnvironment.regenerateTitle, {
     reportFailure: false,
@@ -158,6 +161,8 @@ export function useThreadActionMenu(input: {
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         canFind: onFind !== undefined,
         canPromote,
+        canContinueSubagent:
+          thread.archivedAt === null && sideThreadKindOf(thread) === "provider-subagent",
         branch: thread.branch ?? null,
         projectFilter: null,
         isPinned: thread.pinnedAt != null,
@@ -215,6 +220,9 @@ export function useThreadActionMenu(input: {
         }
       };
       switch (action) {
+        case "continue-subagent":
+          void continueSubagent(threadRef, thread.title);
+          return;
         case "promote":
           void setSidebarParent({
             environmentId: threadRef.environmentId,

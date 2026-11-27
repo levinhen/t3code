@@ -6228,10 +6228,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const sourceRun = runForSourcePoint(sourceProjection, command.sourcePoint);
 
-    // A side chat may open during the parent's first turn; it starts from a digest instead.
+    // A side chat may open during the parent's first turn; it starts from a digest instead. A
+    // provider's own subagent never has runs, so its fork carries its whole transcript.
     if (
       sourceRun === null &&
-      !(command.sideChat === true && command.sourcePoint.type === "latest_stable")
+      !(
+        command.sourcePoint.type === "latest_stable" &&
+        (command.sideChat === true || isProviderNativeSubagentThread(sourceProjection.thread))
+      )
     ) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
@@ -9108,8 +9112,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // Opened during the parent's first turn: the digest is the whole context.
     const sideChatWithoutSource =
       sideChatFork && pendingForkTransfer.sourcePoint.runId === undefined;
+    // A provider's own subagent has no runs; its whole transcript is the context.
+    const subagentContinuation =
+      pendingForkTransfer !== undefined &&
+      !sideChatFork &&
+      pendingForkTransfer.sourcePoint.runId === undefined &&
+      sourceProjection !== null &&
+      isProviderNativeSubagentThread(sourceProjection.thread);
     if (pendingForkTransfer !== undefined) {
-      if (!sideChatWithoutSource && (sourceRun === null || sourceProviderThread === undefined)) {
+      if (
+        !sideChatWithoutSource &&
+        !subagentContinuation &&
+        (sourceRun === null || sourceProviderThread === undefined)
+      ) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
@@ -9252,19 +9267,33 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: now,
           };
     const portableForkItems =
-      !requiresPortableFork || sourceProjection === null || sourceRun === null
+      sourceProjection === null
         ? []
-        : yield* readForkHistoryItems(projectionStore, sourceProjection, sourceRun).pipe(
-            Effect.mapError(
-              (cause) =>
-                new OrchestratorProjectionError({ threadId: sourceProjection.thread.id, cause }),
-            ),
-          );
+        : subagentContinuation
+          ? visibleConversationItems(
+              sourceProjection,
+              yield* readHandoffItems(sourceProjection.thread.id),
+            )
+          : !requiresPortableFork || sourceRun === null
+            ? []
+            : yield* readForkHistoryItems(projectionStore, sourceProjection, sourceRun).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestratorProjectionError({
+                      threadId: sourceProjection.thread.id,
+                      cause,
+                    }),
+                ),
+              );
+    const portableForkSourceProviderInstanceId = subagentContinuation
+      ? pendingForkTransfer?.sourceProviderInstanceId
+      : requiresPortableFork
+        ? sourceRun?.providerInstanceId
+        : undefined;
     const portableForkHandoff =
-      !requiresPortableFork ||
+      portableForkSourceProviderInstanceId == null ||
       pendingForkTransfer === undefined ||
-      sourceProjection === null ||
-      sourceRun === null
+      sourceProjection === null
         ? null
         : yield* contextHandoffService
             .prepareProviderHandoff({
@@ -9275,7 +9304,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               fromProviderThreadIds:
                 sourceProviderThread === undefined ? [] : [sourceProviderThread.id],
               toProviderThreadId: ensuredProviderThread.id,
-              fromProviderInstanceId: sourceRun.providerInstanceId,
+              fromProviderInstanceId: portableForkSourceProviderInstanceId,
               toProviderInstanceId: modelSelection.instanceId,
               coveredRunOrdinals: visibleDeltaRunOrdinals(sourceProjection, portableForkItems),
               strategy: "full_thread_summary",

@@ -187,7 +187,9 @@ import { FreshSessionNotice } from "./FreshSessionNotice";
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { PendingUserInputCard } from "./PendingUserInputCard";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ProviderSubagentBar } from "./ProviderSubagentBar";
+import { useContinueSubagent } from "./useContinueSubagent";
 import { ThreadCreationFailedCard } from "./ThreadCreationFailedCard";
 import {
   FLOATING_WORKING_CONTROL_COVERAGE,
@@ -431,6 +433,7 @@ function ThreadDetailBody(
   if (sidebarSearchActive && composerOwnsKeyboard) setComposerOwnsKeyboard(false);
   const navigation = useNavigation();
   const openLinkedThread = useOpenLinkedThread();
+  const continueSubagent = useContinueSubagent();
   const openInspector = useOpenThreadInspector();
   const { session: voiceInputSession } = useGlobalVoiceInput();
   const reportedModelSelection = useThreadReportedModelSelection(props.selectedThreadDetailRef);
@@ -1897,6 +1900,15 @@ function ThreadDetailBody(
                           reportedModelSelection,
                         )}
                         status={props.providerSubagentStatus ?? null}
+                        onContinue={
+                          props.canOperateThread
+                            ? () =>
+                                void continueSubagent(
+                                  scopeThreadRef(props.environmentId, props.selectedThread.id),
+                                  props.selectedThread.title,
+                                )
+                            : null
+                        }
                         inspect={
                           providerSubagentProvider?.driver === "antigravity"
                             ? {

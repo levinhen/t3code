@@ -4,7 +4,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-execution";
 import { isOrchestrationV2WorkActive } from "@t3tools/contracts";
 import { T, useGT, useMessages } from "gt-react";
-import { ArrowUpLeftIcon } from "lucide-react";
+import { ArrowUpLeftIcon, MessageSquarePlusIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { tickTextContent } from "~/lib/tickTextContent";
@@ -24,6 +24,8 @@ export function ProviderSubagentBar(props: {
   readonly effortLabel: string | null;
   readonly status: ProviderSubagentStatus | null;
   readonly onOpenParent: (() => void) | null;
+  /** Null while the subagent still runs, so its transcript is whole before it is copied. */
+  readonly onContinue: (() => void) | null;
   readonly actions?: ReactNode;
 }) {
   const { status } = props;
@@ -49,6 +51,14 @@ export function ProviderSubagentBar(props: {
             <T>Runs on its own</T>
           </span>
           {props.actions}
+          {props.onContinue && !live ? (
+            <Button size="sm" variant="ghost" onClick={props.onContinue}>
+              <MessageSquarePlusIcon />
+              <span className="@max-[480px]/composer-surface:sr-only">
+                <T>Continue in new thread</T>
+              </span>
+            </Button>
+          ) : null}
           {props.onOpenParent ? (
             <Button size="sm" variant="ghost" onClick={props.onOpenParent}>
               <ArrowUpLeftIcon />

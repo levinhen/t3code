@@ -4500,6 +4500,8 @@
   "712124b07c357894": "Introduce una ruta relativa al espacio de trabajo del hilo. Si ya hay un archivo en esa ruta, se reemplaza.",
   "b9ae72204740bcdf": "Subagente {modelDescription}, {statusLabel}. Funciona por su cuenta y no acepta mensajes.",
   "ee803c266b85aada": "Trabajo",
+  "d7b3152c7ed523f5": "Continuar",
+  "d31fad30d9ae6fcd": "Continuar en un hilo nuevo",
   "e918897e4a19585a": "Abrir el principal",
   "639128685ed19f0f": [
     {
@@ -4996,6 +4998,8 @@
   "378c3404c430fc05": "Igual que /side",
   "08aa54cb113f64b1": "Iniciar una sesión nueva",
   "2a6969164260cdee": "Las pull requests no están disponibles para este proyecto.",
+  "a95f77b12087ec48": "No se pudo continuar el subagente en un hilo nuevo",
+  "409087a011d905eb": "Se creó el hilo, pero no llegó a este dispositivo.",
   "a0ce478324829283": "{term, select, mr {No se pudo vincular esta merge request} cr {No se pudo vincular esta solicitud de cambios} other {No se pudo vincular esta pull request}}",
   "962d13f9565f189b": "{term, select, mr {No se pudo desvincular esta merge request} cr {No se pudo desvincular esta solicitud de cambios} other {No se pudo desvincular esta pull request}}",
   "0f9053e44ef763ec": "{term, select, mr {Pega la URL de una merge request o escribe 123 / #123 para el repositorio de este hilo.} cr {Pega la URL de una solicitud de cambios o escribe 123 / #123 para el repositorio de este hilo.} other {Pega la URL de una pull request o escribe 123 / #123 para el repositorio de este hilo.}}",

@@ -88,4 +88,18 @@ describe("buildThreadActionMenuItems", () => {
     const items = buildThreadActionMenuItems({ ...baseState, canRename: false });
     expect(items.filter((item) => item.disabled).map((item) => item.id)).toEqual(["rename"]);
   });
+
+  it("offers continuing only a provider's own subagent, and only to operators", () => {
+    const ids = (state: Partial<ThreadActionMenuState>) =>
+      buildThreadActionMenuItems({ ...baseState, ...state }).map((item) => [
+        item.id,
+        item.disabled ?? false,
+      ]);
+    expect(ids({})).not.toContainEqual(["continue-subagent", false]);
+    expect(ids({ canContinueSubagent: true })).toContainEqual(["continue-subagent", false]);
+    expect(ids({ canContinueSubagent: true, canOperate: false })).toContainEqual([
+      "continue-subagent",
+      true,
+    ]);
+  });
 });

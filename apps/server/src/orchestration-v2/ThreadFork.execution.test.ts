@@ -5,6 +5,7 @@ import {
   CheckpointScopeId,
   CommandId,
   EventId,
+  isListedThreadLineage,
   MessageId,
   NodeId,
   ProjectId,
@@ -1468,6 +1469,145 @@ it.effect(
       assert.isNull(yield* archivedAt(busy));
       assert.deepEqual(yield* archivedAt(archivedFirst), childArchivedAt);
     }).pipe(Effect.provide(forkCases[0]!.layer)),
+);
+
+it.effect("a provider's own subagent continues in a main thread that carries its transcript", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    const parentId = ThreadId.make("continue-subagent-parent");
+    const subagentId = ThreadId.make("thread:subagent:continue-subagent");
+    const continuedId = ThreadId.make("continue-subagent-main");
+    yield* createParent(parentId);
+    const { thread: parent } = yield* orchestrator.getThreadProjection(parentId);
+    const item = (ordinal: number) => ({
+      id: TurnItemId.make(`${subagentId}:item:${ordinal}`),
+      threadId: subagentId,
+      runId: null,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal,
+      status: "completed" as const,
+      title: null,
+      startedAt: now,
+      completedAt: now,
+      updatedAt: now,
+    });
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make(`${subagentId}:created`),
+          type: "thread.created",
+          threadId: subagentId,
+          occurredAt: now,
+          payload: {
+            ...parent,
+            id: subagentId,
+            title: "Review the parser",
+            createdBy: "agent",
+            creationSource: "provider",
+            lineage: {
+              parentThreadId: parentId,
+              relationshipToParent: "subagent",
+              rootThreadId: parentId,
+            },
+          },
+        },
+        {
+          id: EventId.make(`${subagentId}:task`),
+          type: "turn-item.updated",
+          threadId: subagentId,
+          occurredAt: now,
+          payload: {
+            ...item(1),
+            type: "user_message",
+            createdBy: "agent",
+            creationSource: "provider",
+            inputIntent: "turn_start",
+            messageId: MessageId.make(`${subagentId}:task`),
+            text: "SUBAGENT_TASK_MARKER",
+            attachments: [],
+          },
+        },
+        {
+          id: EventId.make(`${subagentId}:result`),
+          type: "turn-item.updated",
+          threadId: subagentId,
+          occurredAt: now,
+          payload: {
+            ...item(2),
+            type: "assistant_message",
+            messageId: MessageId.make(`${subagentId}:result`),
+            text: "SUBAGENT_RESULT_MARKER",
+            streaming: false,
+          },
+        },
+      ],
+    });
+
+    // Only a provider's own subagent forks without a run; its parent still needs a stable one.
+    const runlessParent = yield* orchestrator
+      .dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("continue-subagent-parent-fork"),
+        sourceThreadId: parentId,
+        targetThreadId: ThreadId.make("continue-subagent-parent-fork"),
+        sourcePoint: { type: "latest_stable" },
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(Effect.flip);
+    assert.equal(runlessParent._tag, "OrchestratorDispatchError");
+
+    yield* orchestrator.dispatch({
+      type: "thread.fork",
+      commandId: CommandId.make("continue-subagent-fork"),
+      sourceThreadId: subagentId,
+      targetThreadId: continuedId,
+      sourcePoint: { type: "latest_stable" },
+      title: "Review the parser",
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const created = yield* orchestrator.getThreadProjection(continuedId);
+    assert.deepEqual(created.thread.lineage, {
+      parentThreadId: subagentId,
+      relationshipToParent: "fork",
+      rootThreadId: parentId,
+    });
+    assert.isTrue(isListedThreadLineage(created.thread.lineage));
+    assert.equal(created.thread.title, "Review the parser");
+
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("continue-subagent-first-message"),
+      threadId: continuedId,
+      messageId: MessageId.make("continue-subagent-first-message"),
+      text: "Fix what you found.",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const started = yield* orchestrator.getThreadProjection(continuedId);
+    const [handoff] = started.contextHandoffs;
+    assert.lengthOf(started.contextHandoffs, 1);
+    assert.deepEqual(started.contextTransfers[0]?.resolution, {
+      strategy: "portable_context",
+      contextHandoffId: handoff!.id,
+    });
+    assert.equal(started.runs[0]?.contextHandoffId, handoff!.id);
+    assert.include(handoff!.summaryText, "SUBAGENT_TASK_MARKER");
+    assert.include(handoff!.summaryText, "SUBAGENT_RESULT_MARKER");
+    // The subagent stays under its parent.
+    const subagent = yield* orchestrator.getThreadProjection(subagentId);
+    assert.isNull(subagent.thread.deletedAt);
+    assert.equal(subagent.thread.lineage.relationshipToParent, "subagent");
+  }).pipe(Effect.provide(forkCases[0]!.layer)),
 );
 
 it.effect("a side chat opened during the parent's first turn starts from a digest", () =>

@@ -4507,6 +4507,8 @@
   "712124b07c357894": "Ange en sökväg relativt trådens arbetsyta. En fil som redan finns på den sökvägen ersätts.",
   "b9ae72204740bcdf": "Subagent {modelDescription}, {statusLabel}. Den körs på egen hand och kan inte ta emot meddelanden.",
   "ee803c266b85aada": "Arbete",
+  "d7b3152c7ed523f5": "Fortsätt",
+  "d31fad30d9ae6fcd": "Fortsätt i en ny tråd",
   "e918897e4a19585a": "Öppna överordnad",
   "639128685ed19f0f": [
     {
@@ -5003,6 +5005,8 @@
   "378c3404c430fc05": "Samma som /side",
   "08aa54cb113f64b1": "Starta en ny session",
   "2a6969164260cdee": "Pull requests är inte tillgängliga för det här projektet.",
+  "a95f77b12087ec48": "Det gick inte att fortsätta subagenten i en ny tråd",
+  "409087a011d905eb": "Tråden skapades men nådde inte den här enheten.",
   "a0ce478324829283": "{term, select, mr {Kunde inte länka den här merge requesten} cr {Kunde inte länka den här ändringsbegäran} other {Kunde inte länka den här pull requesten}}",
   "962d13f9565f189b": "{term, select, mr {Kunde inte ta bort länken till den här merge requesten} cr {Kunde inte ta bort länken till den här ändringsbegäran} other {Kunde inte ta bort länken till den här pull requesten}}",
   "0f9053e44ef763ec": "{term, select, mr {Klistra in en URL till en merge request eller ange 123 / #123 för trådens repo.} cr {Klistra in en URL till en ändringsbegäran eller ange 123 / #123 för trådens repo.} other {Klistra in en URL till en pull request eller ange 123 / #123 för trådens repo.}}",

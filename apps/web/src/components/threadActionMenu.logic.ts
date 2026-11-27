@@ -11,6 +11,7 @@ export type ThreadActionMenuId =
   | "turn-into-project"
   | "project-settings"
   | "promote"
+  | "continue-subagent"
   | "pin"
   | "unpin"
   | "settle"
@@ -102,6 +103,8 @@ export interface ThreadActionMenuState {
   readonly canOperate: boolean;
   readonly canFind?: boolean;
   readonly canPromote?: boolean;
+  /** A provider's own subagent, which takes no messages but can be continued in a new thread. */
+  readonly canContinueSubagent?: boolean;
   /** False where no inline title editor is rendered, such as sidebar search results. */
   readonly canRename?: boolean;
   readonly branch: string | null;
@@ -173,6 +176,15 @@ export function buildThreadActionMenuItems(
       : []),
     ...(state.canPromote
       ? [{ id: "promote" as const, label: resolve(msg("Move to top level")), icon: "arrow-up" }]
+      : []),
+    ...(state.canContinueSubagent
+      ? [
+          {
+            id: "continue-subagent" as const,
+            label: resolve(msg("Continue in new thread")),
+            icon: "message-square-plus",
+          },
+        ]
       : []),
     ...(state.supports.pinning
       ? [

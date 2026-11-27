@@ -168,7 +168,9 @@ section is off. Each device keeps its own choice.
 A task group collects the threads of one piece of work, even across projects, like a tab group
 in a browser. On web and desktop, drag a thread onto another thread: the row you cover splits in
 two. Drop on its left half to start a task group with both threads, or on its right half to nest
-the thread under it. Drag a thread onto a group to add it, and out into the list to take it out.
+the thread under it. A thread with nested threads counts them, and how many wait on you, run,
+failed, or finished. While it is collapsed, the ones running or waiting on you still show under it.
+Drag a thread onto a group to add it, and out into the list to take it out.
 A thread's menu also has **Task group**, to start a group, move it to another, or remove it.
 
 T3 Code names a new group from its threads with your text generation model. Double-click the
@@ -318,7 +320,10 @@ Before archiving the parent, wait for its delegated tasks to finish or cancel th
 
 Subagent threads started by the agent can't take messages; message the parent
 thread instead. When such a subagent needs an approval or an answer, the parent
-thread asks for it.
+thread asks for it. To keep working from what a finished one did, choose **Continue in new
+thread** below its conversation or in its menu. The new thread starts with the subagent's task and
+transcript as context, and the subagent stays under its parent. Antigravity does not record its
+subagents' answers, so only their task carries over.
 
 Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it

@@ -20,6 +20,8 @@ export function ProviderSubagentBar(props: {
   readonly effortLabel: string | null;
   readonly status: ProviderSubagentStatus | null;
   readonly onOpenParent: (() => void) | null;
+  /** Null when the user cannot operate the thread; hidden while the subagent still runs. */
+  readonly onContinue: (() => void) | null;
   /** Set for providers whose children T3 reads on demand instead of streaming. */
   readonly inspect: { readonly environmentId: EnvironmentId; readonly threadId: ThreadId } | null;
 }) {
@@ -77,6 +79,16 @@ export function ProviderSubagentBar(props: {
           label={gt("Work", { $context: "noun, opens the subagent's work log" })}
           tone="secondary"
           onPress={() => setInspecting(true)}
+        />
+      ) : null}
+      {props.onContinue && !live ? (
+        <Button
+          label={gt("Continue", {
+            $context: "button, continues a subagent's work in a new thread",
+          })}
+          accessibilityLabel={gt("Continue in new thread")}
+          tone="secondary"
+          onPress={props.onContinue}
         />
       ) : null}
       {props.onOpenParent ? (

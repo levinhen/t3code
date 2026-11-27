@@ -312,6 +312,7 @@ import type { MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ThreadTimeline } from "./chat/ThreadTimeline";
 import { NativeChildWorkDialog } from "./chat/NativeChildWorkDialog";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
+import { useContinueSubagent } from "../hooks/useContinueSubagent";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
@@ -473,6 +474,7 @@ export default function ChatView(props: ChatViewProps) {
   const embedded = parentPanel !== undefined;
   const panelHostShell = useQuietThreadShell(parentPanel?.hostRef ?? null);
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  const continueSubagent = useContinueSubagent();
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
@@ -3816,6 +3818,12 @@ export default function ChatView(props: ChatViewProps) {
                                 effortLabel={providerSubagentEffortLabel}
                                 status={providerSubagentStatus}
                                 onOpenParent={parentThreadLink?.open ?? null}
+                                onContinue={
+                                  serverThread === null || !canOperateThread
+                                    ? null
+                                    : () =>
+                                        void continueSubagent(routeThreadRef, serverThread.title)
+                                }
                                 actions={
                                   selectedProviderEntry?.driverKind === "antigravity" ? (
                                     <NativeChildWorkDialog
