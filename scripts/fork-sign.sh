@@ -1,8 +1,8 @@
 #!/bin/bash
-# Signs an app bundle with this Mac's fork signing identity, creating the identity on first use.
-# An ad-hoc signature changes with every build, so the Keychain and macOS privacy settings treat
-# each build as a new app and ask again. A fixed certificate keeps the signature's requirement
-# stable, so one "Always Allow" covers later builds too.
+# Signs an app bundle with a stable signing identity for this Mac's fork builds.
+# Prefers an Apple-issued identity (Developer ID Application or Apple Development) because it
+# carries a real TeamIdentifier, keeping macOS Keychain partition_id stable across rebuilds.
+# Falls back to a local self-signed identity in a dedicated keychain if no Apple identity exists.
 #   scripts/fork-sign.sh "/Applications/T3 Code (Fork).app"
 set -euo pipefail
 
@@ -10,6 +10,41 @@ app="${1:?usage: $0 <app bundle>}"
 dir="$HOME/.config/t3code-fork-signing"
 keychain="$dir/signing.keychain-db"
 name="T3 Code Fork Signing"
+
+if [ -n "${T3CODE_FORK_SIGN_IDENTITY:-}" ]; then
+  codesign --force --deep --sign "$T3CODE_FORK_SIGN_IDENTITY" "$app"
+  exit 0
+fi
+
+find_apple_identity() {
+  local target_keychain="${1:-}"
+  local identities
+  if [ -n "$target_keychain" ]; then
+    security unlock-keychain -p "" "$target_keychain" 2>/dev/null || true
+    identities="$(security find-identity -v -p codesigning "$target_keychain" 2>/dev/null || true)"
+  else
+    identities="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+  fi
+  local hash=""
+  for prefix in "Developer ID Application:" "Apple Development:"; do
+    hash="$(printf '%s\n' "$identities" | awk -v p="$prefix" 'index($0, p) { print $2; exit }')"
+    if [ -n "$hash" ]; then
+      printf '%s\n' "$hash"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [ -f "$keychain" ] && apple_id="$(find_apple_identity "$keychain")"; then
+  codesign --force --deep --keychain "$keychain" --sign "$apple_id" "$app"
+  exit 0
+fi
+
+if apple_id="$(find_apple_identity)"; then
+  codesign --force --deep --sign "$apple_id" "$app"
+  exit 0
+fi
 
 if [ ! -f "$keychain" ]; then
   mkdir -p "$dir"
